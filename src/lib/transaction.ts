@@ -71,7 +71,11 @@ export class Transaction {
     this.outputAddressTypes.push({ OpReturn: BigInt(script.length) });
   }
 
-  selectRuneUtxos(runeUtxos: Utxo[], runeId: string, runeAmount: bigint) {
+  private selectRuneUtxos(
+    runeUtxos: Utxo[],
+    runeId: string,
+    runeAmount: bigint
+  ) {
     const selectedUseRuneUtxos: Utxo[] = [];
 
     if (runeAmount == BigInt(0)) {
@@ -106,7 +110,7 @@ export class Transaction {
     return selectedUseRuneUtxos;
   }
 
-  selectBtcUtxos(btcUtxos: Utxo[], btcAmount: bigint) {
+  private selectBtcUtxos(btcUtxos: Utxo[], btcAmount: bigint) {
     const selectedUtxos: Utxo[] = [];
 
     if (btcAmount == BigInt(0)) {
@@ -127,7 +131,7 @@ export class Transaction {
     return selectedUtxos;
   }
 
-  caclulateRuneChangeAmount(
+  private caclulateRuneChangeAmount(
     runeId: string,
     runeUtxos: Utxo[],
     runeAmount: bigint
@@ -158,7 +162,7 @@ export class Transaction {
     return { needChange, changeRuneAmount };
   }
 
-  addRuneOutputs(
+  private addRuneOutputs(
     runeIdStr: string,
     runeUtxos: Utxo[],
     runeAmount: bigint,
@@ -221,7 +225,7 @@ export class Transaction {
     };
   }
 
-  async addBtcAndFees(
+  private async addBtcAndFees(
     btcUtxos: Utxo[],
     btcAmount: bigint,
     paymentAddress: string,

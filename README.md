@@ -229,11 +229,3 @@ MIT
 
 - [Documentation](https://docs.omnity.network/docs/REE/introduction)
 - [GitHub Issues](https://github.com/octopus-network/ree-ts-sdk/issues)
-
-## Changelog
-
-### v0.0.1
-- Initial release
-- Basic Bitcoin and Rune support
-- React integration
-- TypeScript support
