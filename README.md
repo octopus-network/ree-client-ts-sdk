@@ -22,9 +22,9 @@ npm install @ree-network/ts-sdk
 ### Initializing the Client
 
 ```typescript
-import { ReeClient, Network } from "@ree-network/ts-sdk";
+import { ReeClient, Network, type Config } from "@ree-network/ts-sdk";
 
-const config = {
+const config: Config = {
   network: Network.Testnet,
   maestroApiKey: "your-maestro-api-key",
   exchangeIdlFactory: yourExchangeIdlFactory,
@@ -45,7 +45,7 @@ const client = new ReeClient(
 const utxos = await client.getBtcUtxos();
 
 // Get Rune UTXOs
-const runeUtxos = await client.getRuneUtxosByAddress("RUNE_ID");
+const runeUtxos = await client.getRuneUtxos("RUNE_ID");
 
 // Get Rune Info
 const runeInfo = await client.getRuneInfo("RUNE_ID");
@@ -53,8 +53,39 @@ const runeInfo = await client.getRuneInfo("RUNE_ID");
 // Get Bitcoin Balance
 const btcBalance = await client.getBtcBalance();
 
-// Get Rune Balance
 const runeBalance = await client.getRuneBalance("RUNE_ID");
+
+// Search for runes
+const runes = await client.searchRunes("DOG");
+
+// Get pool information
+const pools = await client.getPoolList();
+const poolInfo = await client.getPoolInfo("pool-address");
+```
+
+### Creating and Executing Transactions
+
+```typescript
+// Create a swap transaction
+const transaction = await client.createTransaction({
+  poolAddress: "bc1q...",
+  sendBtcAmount: BigInt(100000), // 0.001 BTC in satoshis
+  sendRuneAmount: BigInt(0),
+  receiveBtcAmount: BigInt(0),
+  receiveRuneAmount: BigInt(1000),
+});
+
+// Build the transaction
+const { psbt, fee } = await transaction.build();
+
+// Sign with your wallet (implementation depends on wallet)
+const signedPsbt = await wallet.signPsbt(psbt);
+
+// Submit the transaction
+const result = await client.invoke(
+  transaction.getIntentionSet(),
+  signedPsbt.toHex()
+);
 ```
 
 ### React Integration
@@ -71,7 +102,16 @@ function App() {
 }
 
 function WalletComponent() {
-  const { client, address, updateWallet } = useRee();
+  const { 
+    client, 
+    address, 
+    updateWallet,
+    getBtcBalance,
+    getRuneBalance,
+    createTransaction 
+  } = useRee();
+
+  const [btcBalance, setBtcBalance] = useState<number | null>(null);
 
   const connectWallet = () => {
     updateWallet({
@@ -80,11 +120,24 @@ function WalletComponent() {
     });
   };
 
+  const loadBalance = async () => {
+    if (client) {
+      const balance = await getBtcBalance();
+      setBtcBalance(balance);
+    }
+  };
+
   if (!client) {
     return <button onClick={connectWallet}>Connect Wallet</button>;
   }
 
-  return <div>Connected: {address}</div>;
+  return (
+    <div>
+      <div>Connected: {address}</div>
+      <div>Balance: {btcBalance} BTC</div>
+      <button onClick={loadBalance}>Load Balance</button>
+    </div>
+  );
 }
 ```
 
@@ -97,9 +150,11 @@ import { ReeProvider, useRee } from "@ree-network/ts-sdk";
 function App() {
   return (
     <LaserEyesProvider config={laserEyesConfig}>
-      <ReeWrapper>
-        <MyComponent />
-      </ReeWrapper>
+      <ReeProvider config={reeConfig}>
+        <ReeWrapper>
+          <MyComponent />
+        </ReeWrapper>
+      </ReeProvider>
     </LaserEyesProvider>
   );
 }
@@ -109,23 +164,15 @@ function ReeWrapper({ children }) {
   const { updateWallet } = useRee();
 
   useEffect(() => {
-    updateWallet({
-      address,
-      paymentAddress,
-    });
-  }, [address, paymentAddress]);
+    if (connected) {
+      updateWallet({
+        address,
+        paymentAddress,
+      });
+    }
+  }, [address, paymentAddress, connected, updateWallet]);
 
   return <>{children}</>;
-}
-
-function MyComponent() {
-  const { client, isConnected } = useRee();
-
-  if (!isConnected || !client) {
-    return <div>Please connect your wallet</div>;
-  }
-
-  return <div>Ready to trade!</div>;
 }
 ```
 
@@ -143,42 +190,96 @@ new ReeClient(address: string, paymentAddress: string, config: Config)
 
 #### Methods
 
-- `getBtcUtxos()`: Get Bitcoin UTXOs for the payment address
-- `getRuneUtxos(runeId: string)`: Get UTXOs containing a specific rune
-- `searchRunes(keyword: string)`: Search for runes by keyword or rune ID
-- `getRuneInfo(runeId: string)`: Get detailed information for a specific rune
-- `getPoolInfo(poolId: string)`: Get information about a liquidity pool
+##### Balance & UTXO Methods
+- `getBtcBalance(): Promise<number>` - Get Bitcoin balance in BTC
+- `getBtcUtxos(): Promise<Utxo[]>` - Get Bitcoin UTXOs for the payment address
+- `getRuneBalance(runeId: string): Promise<number | undefined>` - Get balance for a specific rune
+- `getRuneUtxos(runeId: string): Promise<Utxo[]>` - Get UTXOs containing a specific rune
+
+##### Rune Information Methods
+- `searchRunes(keyword: string): Promise<RuneInfo[]>` - Search for runes by keyword or rune ID
+- `getRuneInfo(runeId: string): Promise<RuneInfo | undefined>` - Get detailed information for a specific rune
+
+##### Pool Methods
+- `getPoolList(): Promise<Pool[]>` - Get list of all available liquidity pools
+- `getPoolInfo(poolAddress: string): Promise<PoolInfo>` - Get information about a specific liquidity pool
+
+##### Transaction Methods
+- `createTransaction(params): Promise<Transaction>` - Create a transaction for trading with a liquidity pool
+- `invoke(intentionSet: IntentionSet, signedPsbtHex: string): Promise<any>` - Submit a signed transaction
+
+### Transaction
+
+Transaction builder for Bitcoin and Rune transactions.
+
+#### Methods
+- `build(): Promise<{ psbt: bitcoin.Psbt, fee: bigint }>` - Build the PSBT and calculate fees
+- `getIntentionSet(): IntentionSet` - Get the intention set for the transaction
 
 ### React Hooks
 
 #### useRee()
 
-Returns the current Ree context with client instance and wallet state.
+Returns the current Ree context with client instance and all methods.
 
 ```typescript
 const {
-  client, // ReeClient instance or null
-  address, // Current Bitcoin address
-  paymentAddress, // Current payment address
-  updateWallet, // Function to update wallet state
+  client,              // ReeClient instance or null
+  address,             // Current Bitcoin address
+  paymentAddress,      // Current payment address
+  updateWallet,        // Function to update wallet state
+  
+  // All client methods are available directly
+  getBtcBalance,
+  getBtcUtxos,
+  getRuneBalance,
+  getRuneUtxos,
+  searchRunes,
+  getRuneInfo,
+  getPoolList,
+  getPoolInfo,
+  createTransaction,
+  invoke,
 } = useRee();
+```
+
+### Types
+
+The SDK exports all necessary TypeScript types:
+
+```typescript
+import type { 
+  Config,
+  Utxo,
+  RuneInfo,
+  Pool,
+  PoolInfo,
+  IntentionSet,
+  Intention,
+  TransactionConfig,
+  AddressType 
+} from "@ree-network/ts-sdk";
 ```
 
 ### Configuration
 
 ```typescript
 interface Config {
-  network: Network; // Network.Mainnet or Network.Testnet
-  maestroApiKey: string; // Your Maestro API key
+  network: Network;                    // Network.Mainnet or Network.Testnet
+  maestroApiKey: string;              // Your Maestro API key
   exchangeIdlFactory: IDL.InterfaceFactory; // Exchange canister IDL
-  exchangeCanisterId: string; // Exchange canister ID
+  exchangeCanisterId: string;         // Exchange canister ID
 }
 ```
 
-## Networks
+### Networks
 
-- `Network.Mainnet`: Bitcoin mainnet
-- `Network.Testnet`: Bitcoin testnet
+```typescript
+enum Network {
+  Mainnet = "mainnet",
+  Testnet = "testnet"
+}
+```
 
 ## Error Handling
 
@@ -188,6 +289,19 @@ try {
 } catch (error) {
   console.error("Failed to fetch UTXOs:", error);
 }
+
+// React hook error handling
+const { getBtcBalance } = useRee();
+
+const loadBalance = async () => {
+  try {
+    const balance = await getBtcBalance();
+    setBalance(balance);
+  } catch (error) {
+    console.error("Failed to load balance:", error);
+    setError(error.message);
+  }
+};
 ```
 
 ## Testing

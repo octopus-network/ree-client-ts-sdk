@@ -1,11 +1,14 @@
 import { AddressType } from "../types/address";
 import * as bitcoin from "bitcoinjs-lib";
+import { Network } from "../types/network";
+import { toBitcoinNetwork } from "./common";
 
 export function getScriptByAddress(
   address: string,
-  network = bitcoin.networks.testnet
+  network: Network = Network.Testnet
 ) {
-  const payment = bitcoin.address.toOutputScript(address, network);
+  const bitcoinNetwork = toBitcoinNetwork(network);
+  const payment = bitcoin.address.toOutputScript(address, bitcoinNetwork);
   return payment;
 }
 

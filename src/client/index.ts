@@ -149,7 +149,7 @@ export class ReeClient {
 
     // Transform and add script pubkey for each UTXO
     const runeUtxos: Utxo[] = data.map(({ txid, vout, runes, satoshis }) => {
-      const scriptPk = getScriptByAddress(this.address);
+      const scriptPk = getScriptByAddress(this.address, this.config.network);
       return {
         txid,
         vout,
@@ -370,7 +370,7 @@ export class ReeClient {
     // Transform pool UTXOs to internal format
     const poolUtxos: Utxo[] = poolInfo.utxos.map(
       ({ txid, vout, coins, sats }) => {
-        const scriptPk = getScriptByAddress(poolAddress);
+        const scriptPk = getScriptByAddress(poolAddress, this.config.network);
         return {
           txid,
           vout,
