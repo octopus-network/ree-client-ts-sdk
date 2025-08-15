@@ -1,24 +1,26 @@
 import type { TransactionConfig } from "../types/transaction";
-
 import type { AddressType } from "../types/address";
 import type { Utxo } from "../types/utxo";
 import { RuneId, Edict, Runestone, none } from "runelib";
 import * as bitcoin from "bitcoinjs-lib";
 import { toBitcoinNetwork, getAddressType } from "../utils";
 import { UTXO_DUST } from "../constants";
-
 import { type ActorSubclass } from "@dfinity/agent";
 
+/**
+ * Transaction builder for Bitcoin and Rune transactions
+ * Handles PSBT creation, UTXO selection, and fee calculation
+ */
 export class Transaction {
   private psbt: bitcoin.Psbt;
-
   private inputAddressTypes: AddressType[] = [];
   private outputAddressTypes: AddressType[] = [];
-
   private config: TransactionConfig;
-
+  
+  /** Track dust amounts from user input UTXOs for fee calculation */
   private userInputUtxoDusts = BigInt(0);
 
+  /** Orchestrator actor for fee estimation */
   readonly orchestrator: ActorSubclass;
 
   constructor(config: TransactionConfig, orchestrator: ActorSubclass) {
@@ -31,7 +33,11 @@ export class Transaction {
     this.orchestrator = orchestrator;
   }
 
-  addInput(utxo: Utxo) {
+  /**
+   * Add a UTXO as transaction input
+   * @param utxo - The UTXO to add as input
+   */
+  private addInput(utxo: Utxo) {
     const { address } = utxo;
 
     this.psbt.data.addInput({
@@ -45,6 +51,7 @@ export class Transaction {
 
     this.inputAddressTypes.push(getAddressType(address));
 
+    // Track dust from user's rune UTXOs for fee calculation
     if (
       (address === this.config.address ||
         address === this.config.paymentAddress) &&
@@ -54,7 +61,12 @@ export class Transaction {
     }
   }
 
-  addOutput(address: string, amount: bigint) {
+  /**
+   * Add a standard output to the transaction
+   * @param address - Recipient address
+   * @param amount - Amount in satoshis
+   */
+  private addOutput(address: string, amount: bigint) {
     this.psbt.addOutput({
       address,
       value: amount,
@@ -62,7 +74,11 @@ export class Transaction {
     this.outputAddressTypes.push(getAddressType(address));
   }
 
-  addScriptOutput(script: Buffer) {
+  /**
+   * Add an OP_RETURN script output (for Runestone)
+   * @param script - The script buffer to include
+   */
+  private addScriptOutput(script: Buffer) {
     this.psbt.addOutput({
       script,
       value: BigInt(0),
@@ -71,6 +87,13 @@ export class Transaction {
     this.outputAddressTypes.push({ OpReturn: BigInt(script.length) });
   }
 
+  /**
+   * Select UTXOs containing specific runes for the transaction
+   * @param runeUtxos - Available rune UTXOs
+   * @param runeId - Target rune ID
+   * @param runeAmount - Required rune amount
+   * @returns Selected UTXOs that contain the required runes
+   */
   private selectRuneUtxos(
     runeUtxos: Utxo[],
     runeId: string,
@@ -82,6 +105,7 @@ export class Transaction {
       return selectedUseRuneUtxos;
     }
 
+    // First, try to find exact match
     for (const v of runeUtxos) {
       if (v.runes.length) {
         const balance = v.runes.find((r) => r.id == runeId);
@@ -92,6 +116,7 @@ export class Transaction {
       }
     }
 
+    // If no exact match, collect UTXOs until we have enough
     if (selectedUseRuneUtxos.length == 0) {
       let total = BigInt(0);
       for (const v of runeUtxos) {
@@ -110,6 +135,12 @@ export class Transaction {
     return selectedUseRuneUtxos;
   }
 
+  /**
+   * Select BTC UTXOs for the transaction
+   * @param btcUtxos - Available BTC UTXOs
+   * @param btcAmount - Required BTC amount in satoshis
+   * @returns Selected UTXOs that contain enough BTC
+   */
   private selectBtcUtxos(btcUtxos: Utxo[], btcAmount: bigint) {
     const selectedUtxos: Utxo[] = [];
 
@@ -119,6 +150,7 @@ export class Transaction {
 
     let totalAmount = BigInt(0);
     for (const utxo of btcUtxos) {
+      // Skip UTXOs that contain runes (BTC-only UTXOs)
       if (utxo.runes.length) {
         continue;
       }
@@ -131,6 +163,13 @@ export class Transaction {
     return selectedUtxos;
   }
 
+  /**
+   * Calculate rune change amount and determine if change is needed
+   * @param runeId - The rune ID to calculate change for
+   * @param runeUtxos - UTXOs containing the runes
+   * @param runeAmount - Amount being sent
+   * @returns Change calculation result
+   */
   private caclulateRuneChangeAmount(
     runeId: string,
     runeUtxos: Utxo[],
@@ -140,6 +179,7 @@ export class Transaction {
     let hasMultipleRunes = false;
     const runesMap: Record<string, boolean> = {};
 
+    // Calculate total rune amount and check for multiple rune types
     runeUtxos.forEach((v) => {
       if (v.runes) {
         v.runes.forEach((w) => {
@@ -157,11 +197,20 @@ export class Transaction {
 
     const changeRuneAmount = fromRuneAmount - runeAmount;
 
+    // Need change if there are multiple runes or leftover amount
     const needChange = hasMultipleRunes || changeRuneAmount > 0;
 
     return { needChange, changeRuneAmount };
   }
 
+  /**
+   * Add rune-related outputs to the transaction
+   * @param runeIdStr - Rune ID string (block:index format)
+   * @param runeUtxos - UTXOs containing the runes
+   * @param runeAmount - Amount of runes to transfer
+   * @param receiveAddress - Address to receive the runes
+   * @returns Information about whether change output is needed
+   */
   private addRuneOutputs(
     runeIdStr: string,
     runeUtxos: Utxo[],
@@ -169,9 +218,9 @@ export class Transaction {
     receiveAddress: string
   ) {
     const [runeBlock, runeIndex] = runeIdStr.split(":");
-
     const runeId = new RuneId(Number(runeBlock), Number(runeIndex));
 
+    // Special case: transfer all runes from UTXOs (amount = 0)
     if (runeAmount === BigInt(0) && runeUtxos.length !== 0) {
       const runeAmountAcc = runeUtxos.reduce(
         (acc, utxo) =>
@@ -200,23 +249,24 @@ export class Transaction {
 
     const changeAddress = runeUtxos[0].address;
 
+    // Create edicts for rune transfer and change
     const edicts = needChange
       ? [
-          new Edict(runeId, runeAmount, 1),
-          new Edict(runeId, changeRuneAmount, 2),
+          new Edict(runeId, runeAmount, 1), // Send to recipient
+          new Edict(runeId, changeRuneAmount, 2), // Change back to sender
         ]
-      : [new Edict(runeId, runeAmount, 1)];
+      : [new Edict(runeId, runeAmount, 1)]; // Send to recipient only
 
     const runestone = new Runestone(edicts, none(), none(), none());
 
-    // output 0,  OP_RETURN
+    // Output 0: OP_RETURN with runestone
     this.addScriptOutput(runestone.encipher());
 
-    // output 1
+    // Output 1: Recipient gets dust + runes
     this.addOutput(receiveAddress, UTXO_DUST);
 
     if (needChange) {
-      // output 2
+      // Output 2: Change address gets dust + remaining runes
       this.addOutput(changeAddress, UTXO_DUST);
     }
 
@@ -225,6 +275,14 @@ export class Transaction {
     };
   }
 
+  /**
+   * Add BTC outputs and calculate transaction fees
+   * @param btcUtxos - Available BTC UTXOs
+   * @param btcAmount - Required BTC amount
+   * @param paymentAddress - Address for change output
+   * @param additionalDustNeeded - Additional dust needed for rune outputs
+   * @returns Fee calculation result
+   */
   private async addBtcAndFees(
     btcUtxos: Utxo[],
     btcAmount: bigint,
@@ -241,19 +299,22 @@ export class Transaction {
 
     const inputAddressTypesClone = [...this.inputAddressTypes];
 
+    // Iteratively calculate fees until convergence
     do {
       lastFee = currentFee;
 
+      // Get fee estimate from orchestrator
       const res = (await this.orchestrator.estimate_min_tx_fee({
         input_types: this.inputAddressTypes,
         pool_address: [this.config.poolAddress],
         output_types: this.outputAddressTypes,
       })) as { Ok: bigint };
 
-      currentFee = res.Ok + BigInt(1);
+      currentFee = res.Ok + BigInt(1); // Add 1 sat buffer
       targetBtcAmount =
         btcAmount + currentFee + additionalDustNeeded - this.userInputUtxoDusts;
 
+      // Select UTXOs if fee increased and we need more BTC
       if (currentFee > lastFee && targetBtcAmount > 0) {
         const _selectedUtxos = this.selectBtcUtxos(btcUtxos, targetBtcAmount);
 
@@ -261,6 +322,7 @@ export class Transaction {
           throw new Error("INSUFFICIENT_BTC_UTXOs");
         }
 
+        // Update input types for next fee calculation
         this.inputAddressTypes = inputAddressTypesClone.concat([
           ..._selectedUtxos.map(() => getAddressType(paymentAddress)),
         ]);
@@ -270,6 +332,7 @@ export class Transaction {
           BigInt(0)
         );
 
+        // Remove change output from fee calculation if change is too small
         if (
           !(
             totalBtcAmount - targetBtcAmount > 0 &&
@@ -283,6 +346,7 @@ export class Transaction {
       }
     } while (currentFee > lastFee && targetBtcAmount > 0);
 
+    // Add selected UTXOs as inputs
     let totalBtcAmount = BigInt(0);
     selectedUtxos.forEach((utxo) => {
       this.addInput(utxo);
@@ -291,15 +355,17 @@ export class Transaction {
 
     const changeBtcAmount = totalBtcAmount - targetBtcAmount;
     if (changeBtcAmount < 0) {
-      throw new Error("Inssuficient UTXO(s)");
+      throw new Error("Insufficient UTXO(s)");
     }
 
+    // Add change output if amount is above dust threshold
     if (changeBtcAmount > UTXO_DUST) {
       this.psbt.addOutput({
         address: paymentAddress,
         value: changeBtcAmount,
       });
     } else if (changeBtcAmount > BigInt(0)) {
+      // Small change gets discarded as additional fee
       discardedSats = changeBtcAmount;
     }
 
@@ -309,6 +375,11 @@ export class Transaction {
     };
   }
 
+  /**
+   * Build the complete transaction
+   * Handles both BTC-only and Rune transactions
+   * @returns Built PSBT and total fee
+   */
   async build(): Promise<{ psbt: bitcoin.Psbt; fee: bigint }> {
     const {
       runeId: runeIdStr,
@@ -323,6 +394,36 @@ export class Transaction {
       poolAddress,
     } = this.config;
 
+    // Handle BTC-only transaction (no runeId provided)
+    if (!runeIdStr || !runeUtxos?.length) {
+      // Add pool UTXOs (BTC only)
+      poolUtxos.forEach((utxo) => {
+        this.addInput(utxo);
+      });
+
+      // Calculate total pool BTC amount
+      const poolBtcAmount = poolUtxos.reduce(
+        (total, utxo) => total + BigInt(utxo.satoshis),
+        BigInt(0)
+      );
+
+      // Add BTC output to pool
+      this.addOutput(poolAddress, poolBtcAmount + sendBtcAmount);
+
+      // Add BTC inputs and calculate fees
+      const { discardedSats, currentFee } = await this.addBtcAndFees(
+        btcUtxos,
+        sendBtcAmount,
+        paymentAddress
+      );
+
+      return {
+        psbt: this.psbt,
+        fee: discardedSats + currentFee,
+      };
+    }
+
+    // Handle Rune transaction logic
     const selectedRuneUtxos = this.selectRuneUtxos(
       runeUtxos,
       runeIdStr,
@@ -332,6 +433,7 @@ export class Transaction {
     const isUserSendRune =
       sendRuneAmount > BigInt(0) && selectedRuneUtxos.length > 0;
 
+    // Add user's rune UTXOs as inputs if sending runes
     if (isUserSendRune) {
       selectedRuneUtxos.forEach((utxo) => {
         this.addInput(utxo);
@@ -341,7 +443,7 @@ export class Transaction {
     let poolRuneAmount = BigInt(0),
       poolBtcAmount = BigInt(0);
 
-    // add pool utxo
+    // Add pool UTXOs as inputs
     poolUtxos.forEach((utxo) => {
       const rune = utxo.runes.find((rune) => rune.id === runeIdStr);
       poolRuneAmount += BigInt(rune?.amount ?? "0");
@@ -349,6 +451,7 @@ export class Transaction {
       this.addInput(utxo);
     });
 
+    // Add rune outputs (OP_RETURN + dust outputs)
     const { needChange } = this.addRuneOutputs(
       runeIdStr,
       isUserSendRune ? selectedRuneUtxos : poolUtxos,
@@ -356,8 +459,10 @@ export class Transaction {
       isUserSendRune ? poolAddress : address
     );
 
+    // Add BTC output to pool
     this.addOutput(poolAddress, poolBtcAmount + sendBtcAmount);
 
+    // Add BTC inputs and calculate fees
     const { discardedSats, currentFee } = await this.addBtcAndFees(
       btcUtxos,
       sendBtcAmount,

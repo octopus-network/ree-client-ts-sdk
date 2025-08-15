@@ -6,10 +6,10 @@ export interface TransactionConfig {
   address: string;
   paymentAddress: string;
   poolAddress: string;
+  runeId?: string;
+  runeUtxos?: Utxo[];
   btcUtxos: Utxo[];
-  runeUtxos: Utxo[];
   poolUtxos: Utxo[];
-  runeId: string;
   sendBtcAmount: bigint;
   sendRuneAmount: bigint;
   receiveBtcAmount: bigint;
