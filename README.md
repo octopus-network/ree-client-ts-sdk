@@ -19,35 +19,48 @@ npm install @ree-network/ts-sdk
 
 ## Quick Start
 
-### Basic Usage
+### Initializing the Client
 
 ```typescript
-import { ReeClient, Network } from '@ree-network/ts-sdk';
+import { ReeClient, Network } from "@ree-network/ts-sdk";
 
 const config = {
   network: Network.Testnet,
-  maestroApiKey: 'your-maestro-api-key',
+  maestroApiKey: "your-maestro-api-key",
   exchangeIdlFactory: yourExchangeIdlFactory,
-  exchangeCanisterId: 'your-canister-id',
+  exchangeCanisterId: "your-canister-id",
 };
 
 const client = new ReeClient(
-  'bc1q...', // Bitcoin address
-  'bc1q...', // Payment address
+  "bc1q...", // Bitcoin address
+  "bc1q...", // Payment address
   config
 );
+```
 
+### Basic Usage
+
+```typescript
 // Get Bitcoin UTXOs
 const utxos = await client.getBtcUtxos();
 
 // Get Rune UTXOs
-const runeUtxos = await client.getRuneUtxosByAddress('RUNE_ID');
+const runeUtxos = await client.getRuneUtxosByAddress("RUNE_ID");
+
+// Get Rune Info
+const runeInfo = await client.getRuneInfo("RUNE_ID");
+
+// Get Bitcoin Balance
+const btcBalance = await client.getBtcBalance();
+
+// Get Rune Balance
+const runeBalance = await client.getRuneBalance("RUNE_ID");
 ```
 
 ### React Integration
 
 ```tsx
-import { ReeProvider, useRee } from '@ree-network/ts-sdk';
+import { ReeProvider, useRee } from "@ree-network/ts-sdk";
 
 function App() {
   return (
@@ -62,8 +75,8 @@ function WalletComponent() {
 
   const connectWallet = () => {
     updateWallet({
-      address: 'bc1q...',
-      paymentAddress: 'bc1q...',
+      address: "bc1q...",
+      paymentAddress: "bc1q...",
     });
   };
 
@@ -78,8 +91,8 @@ function WalletComponent() {
 ### Integration with LaserEyes
 
 ```tsx
-import { LaserEyesProvider, useLaserEyes } from '@omnisat/lasereyes-core';
-import { ReeProvider, useRee } from '@ree-network/ts-sdk';
+import { LaserEyesProvider, useLaserEyes } from "@omnisat/lasereyes-core";
+import { ReeProvider, useRee } from "@ree-network/ts-sdk";
 
 function App() {
   return (
@@ -107,7 +120,7 @@ function ReeWrapper({ children }) {
 
 function MyComponent() {
   const { client, isConnected } = useRee();
-  
+
   if (!isConnected || !client) {
     return <div>Please connect your wallet</div>;
   }
@@ -131,9 +144,10 @@ new ReeClient(address: string, paymentAddress: string, config: Config)
 #### Methods
 
 - `getBtcUtxos()`: Get Bitcoin UTXOs for the payment address
-- `getRuneUtxosByAddress(runeId: string)`: Get Rune UTXOs for a specific Rune ID
+- `getRuneUtxos(runeId: string)`: Get UTXOs containing a specific rune
+- `searchRunes(keyword: string)`: Search for runes by keyword or rune ID
+- `getRuneInfo(runeId: string)`: Get detailed information for a specific rune
 - `getPoolInfo(poolId: string)`: Get information about a liquidity pool
-- `createSwapTransaction(params)`: Create a swap transaction
 
 ### React Hooks
 
@@ -143,12 +157,10 @@ Returns the current Ree context with client instance and wallet state.
 
 ```typescript
 const {
-  client,           // ReeClient instance or null
-  address,          // Current Bitcoin address
-  paymentAddress,   // Current payment address
-  publicKey,        // Public key
-  paymentPublicKey, // Payment public key
-  updateWallet,     // Function to update wallet state
+  client, // ReeClient instance or null
+  address, // Current Bitcoin address
+  paymentAddress, // Current payment address
+  updateWallet, // Function to update wallet state
 } = useRee();
 ```
 
@@ -156,10 +168,10 @@ const {
 
 ```typescript
 interface Config {
-  network: Network;                    // Network.Mainnet or Network.Testnet
-  maestroApiKey: string;              // Your Maestro API key
+  network: Network; // Network.Mainnet or Network.Testnet
+  maestroApiKey: string; // Your Maestro API key
   exchangeIdlFactory: IDL.InterfaceFactory; // Exchange canister IDL
-  exchangeCanisterId: string;         // Exchange canister ID
+  exchangeCanisterId: string; // Exchange canister ID
 }
 ```
 
@@ -174,7 +186,7 @@ interface Config {
 try {
   const utxos = await client.getBtcUtxos();
 } catch (error) {
-  console.error('Failed to fetch UTXOs:', error);
+  console.error("Failed to fetch UTXOs:", error);
 }
 ```
 
@@ -206,12 +218,6 @@ npm run build
 # Preview the build
 npm run preview
 ```
-
-## Requirements
-
-- Node.js 18+
-- React 18+ (for React integration)
-- TypeScript 5+
 
 ## License
 
