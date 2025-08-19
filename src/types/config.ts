@@ -5,5 +5,6 @@ export type Config = {
   network: Network;
   maestroApiKey: string;
   exchangeIdlFactory: IDL.InterfaceFactory;
+  exchangeId: string;
   exchangeCanisterId: string;
 };

@@ -4,8 +4,13 @@ import type { Utxo } from "../types/utxo";
 import { RuneId, Edict, Runestone, none } from "runelib";
 import * as bitcoin from "bitcoinjs-lib";
 import { toBitcoinNetwork, getAddressType } from "../utils";
-import { UTXO_DUST } from "../constants";
+import { UTXO_DUST, BITCOIN_ID } from "../constants";
 import { type ActorSubclass } from "@dfinity/agent";
+import type {
+  InputCoin,
+  IntentionSet,
+  OutputCoin,
+} from "../types/orchestrator";
 
 /**
  * Transaction builder for Bitcoin and Rune transactions
@@ -16,7 +21,7 @@ export class Transaction {
   private inputAddressTypes: AddressType[] = [];
   private outputAddressTypes: AddressType[] = [];
   private config: TransactionConfig;
-  
+
   /** Track dust amounts from user input UTXOs for fee calculation */
   private userInputUtxoDusts = BigInt(0);
 
@@ -44,7 +49,7 @@ export class Transaction {
       hash: utxo.txid,
       index: utxo.vout,
       witnessUtxo: {
-        value: BigInt(utxo.satoshis),
+        value: Number(utxo.satoshis),
         script: Buffer.from(utxo.scriptPk, "hex"),
       },
     });
@@ -69,7 +74,7 @@ export class Transaction {
   private addOutput(address: string, amount: bigint) {
     this.psbt.addOutput({
       address,
-      value: amount,
+      value: Number(amount),
     });
     this.outputAddressTypes.push(getAddressType(address));
   }
@@ -81,7 +86,7 @@ export class Transaction {
   private addScriptOutput(script: Buffer) {
     this.psbt.addOutput({
       script,
-      value: BigInt(0),
+      value: 0,
     });
 
     this.outputAddressTypes.push({ OpReturn: BigInt(script.length) });
@@ -362,7 +367,7 @@ export class Transaction {
     if (changeBtcAmount > UTXO_DUST) {
       this.psbt.addOutput({
         address: paymentAddress,
-        value: changeBtcAmount,
+        value: Number(changeBtcAmount),
       });
     } else if (changeBtcAmount > BigInt(0)) {
       // Small change gets discarded as additional fee
@@ -380,12 +385,17 @@ export class Transaction {
    * Handles both BTC-only and Rune transactions
    * @returns Built PSBT and total fee
    */
-  async build(): Promise<{ psbt: bitcoin.Psbt; fee: bigint }> {
+  async build(
+    action: string,
+    nonce: bigint,
+    actionParams?: string
+  ): Promise<{ psbt: bitcoin.Psbt; intentionSet: IntentionSet }> {
     const {
       runeId: runeIdStr,
       sendRuneAmount,
       receiveRuneAmount,
       sendBtcAmount,
+      receiveBtcAmount,
       btcUtxos,
       runeUtxos,
       poolUtxos,
@@ -417,9 +427,47 @@ export class Transaction {
         paymentAddress
       );
 
+      const inputCoins: InputCoin[] = [
+        {
+          from: paymentAddress,
+          coin: {
+            id: BITCOIN_ID,
+            value: sendBtcAmount,
+          },
+        },
+      ];
+
+      const outputCoins: OutputCoin[] = [];
+
+      if (receiveBtcAmount > BigInt(0)) {
+        outputCoins.push({
+          to: address,
+          coin: {
+            id: BITCOIN_ID,
+            value: receiveRuneAmount,
+          },
+        });
+      }
+
       return {
         psbt: this.psbt,
-        fee: discardedSats + currentFee,
+        intentionSet: {
+          tx_fee_in_sats: discardedSats + currentFee,
+          initiator_address: paymentAddress,
+          intentions: [
+            {
+              action,
+              exchange_id: this.config.exchangeId,
+              input_coins: inputCoins,
+              pool_utxo_spent: [],
+              pool_utxo_received: [],
+              output_coins: outputCoins,
+              pool_address: poolAddress,
+              action_params: actionParams ?? "",
+              nonce,
+            },
+          ],
+        },
       };
     }
 
@@ -470,9 +518,68 @@ export class Transaction {
       isUserSendRune && needChange ? UTXO_DUST : BigInt(0)
     );
 
+    const inputCoins: InputCoin[] = [];
+    const outputCoins: OutputCoin[] = [];
+
+    if (sendBtcAmount > BigInt(0)) {
+      inputCoins.push({
+        from: paymentAddress,
+        coin: {
+          id: BITCOIN_ID,
+          value: sendBtcAmount,
+        },
+      });
+    }
+
+    if (sendRuneAmount > BigInt(0)) {
+      inputCoins.push({
+        from: address,
+        coin: {
+          id: runeIdStr,
+          value: sendRuneAmount,
+        },
+      });
+    }
+
+    if (receiveBtcAmount > BigInt(0)) {
+      outputCoins.push({
+        to: paymentAddress,
+        coin: {
+          id: BITCOIN_ID,
+          value: receiveBtcAmount,
+        },
+      });
+    }
+
+    if (receiveRuneAmount > BigInt(0)) {
+      outputCoins.push({
+        to: address,
+        coin: {
+          id: runeIdStr,
+          value: receiveRuneAmount,
+        },
+      });
+    }
+
     return {
       psbt: this.psbt,
-      fee: discardedSats + currentFee,
+      intentionSet: {
+        tx_fee_in_sats: discardedSats + currentFee,
+        initiator_address: paymentAddress,
+        intentions: [
+          {
+            action,
+            exchange_id: this.config.exchangeId,
+            input_coins: inputCoins,
+            pool_utxo_spent: [],
+            pool_utxo_received: [],
+            output_coins: outputCoins,
+            pool_address: poolAddress,
+            action_params: actionParams ?? "",
+            nonce,
+          },
+        ],
+      },
     };
   }
 }

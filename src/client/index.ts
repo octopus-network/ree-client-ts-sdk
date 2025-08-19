@@ -26,11 +26,6 @@ import {
  * Provides methods for Bitcoin UTXO management, Rune operations, and transaction creation
  */
 export class ReeClient {
-  /** User's Ordinals address */
-  readonly address: string;
-  /** User's Bitcoin address */
-  readonly paymentAddress: string;
-
   /** Maestro API client for Bitcoin data */
   readonly maestro: Maestro;
   /** Configuration object */
@@ -43,13 +38,9 @@ export class ReeClient {
 
   /**
    * Initialize ReeClient with wallet addresses and configuration
-   * @param address - Bitcoin address for receiving funds
-   * @param paymentAddress - Bitcoin address for sending transactions
    * @param config - Client configuration including network and API keys
    */
-  constructor(address: string, paymentAddress: string, config: Config) {
-    this.address = address;
-    this.paymentAddress = paymentAddress;
+  constructor(config: Config) {
     this.config = config;
 
     const isTestNet = config.network === Network.Testnet;
@@ -91,20 +82,39 @@ export class ReeClient {
   }
 
   /**
+   * Filter out UTXOs that have already been spent or are being used in pending transactions
+   * Queries the orchestrator to get a list of used outpoints and removes them from the UTXO set
+   * @param address - The Bitcoin (or Ordinals) address to check used outpoints for
+   * @param utxos - Array of UTXOs to filter
+   * @returns Filtered array of UTXOs excluding spent/used ones
+   */
+  private async filterSpentUtxos(
+    address: string,
+    utxos: Utxo[]
+  ): Promise<Utxo[]> {
+    const usedOutpoints = (await this.orchestrator.get_used_outpoints([
+      address,
+    ])) as [string, string][];
+    return utxos.filter(
+      ({ txid, vout }) =>
+        usedOutpoints.findIndex(
+          ([outpoint]) => `${txid}:${vout}` === outpoint
+        ) < 0
+    );
+  }
+
+  /**
    * Get all Bitcoin UTXOs for the payment address
    * Handles pagination automatically to fetch all available UTXOs
    * @returns Array of Bitcoin UTXOs
    */
-  async getBtcUtxos(): Promise<Utxo[]> {
+  async getBtcUtxos(paymentAddress: string): Promise<Utxo[]> {
     let cursor = null;
     const data = [];
 
     // Paginate through all UTXOs
     do {
-      const res = await this.maestro.utxosByAddress(
-        this.paymentAddress,
-        cursor
-      );
+      const res = await this.maestro.utxosByAddress(paymentAddress, cursor);
       data.push(...res.data);
       cursor = res.next_cursor;
     } while (cursor !== null);
@@ -124,7 +134,7 @@ export class ReeClient {
       })
     );
 
-    return btcUtxos;
+    return this.filterSpentUtxos(paymentAddress, btcUtxos);
   }
 
   /**
@@ -132,14 +142,14 @@ export class ReeClient {
    * @param runeId - The rune ID to filter UTXOs by
    * @returns Array of UTXOs containing the specified rune
    */
-  async getRuneUtxos(runeId: string): Promise<Utxo[]> {
+  async getRuneUtxos(address: string, runeId: string): Promise<Utxo[]> {
     let cursor = null;
     const data = [];
 
     // Paginate through all rune UTXOs for this specific rune
     do {
       const res = await this.maestro.runeUtxosByAddress(
-        this.address,
+        address,
         runeId,
         cursor
       );
@@ -149,11 +159,11 @@ export class ReeClient {
 
     // Transform and add script pubkey for each UTXO
     const runeUtxos: Utxo[] = data.map(({ txid, vout, runes, satoshis }) => {
-      const scriptPk = getScriptByAddress(this.address, this.config.network);
+      const scriptPk = getScriptByAddress(address, this.config.network);
       return {
         txid,
         vout,
-        address: this.address,
+        address,
         runes: runes.map(({ rune_id, amount }) => ({
           id: rune_id,
           amount,
@@ -163,7 +173,7 @@ export class ReeClient {
       };
     });
 
-    return runeUtxos;
+    return this.filterSpentUtxos(address, runeUtxos);
   }
 
   /**
@@ -257,8 +267,8 @@ export class ReeClient {
    * Get total Bitcoin balance from all UTXOs
    * @returns Total balance in satoshis
    */
-  async getBtcBalance(): Promise<number> {
-    const btcUtxos = await this.getBtcUtxos();
+  async getBtcBalance(paymentAddress: string): Promise<number> {
+    const btcUtxos = await this.getBtcUtxos(paymentAddress);
     const satoshis = btcUtxos.reduce(
       (total, utxo) => total + BigInt(utxo.satoshis),
       BigInt(0)
@@ -273,9 +283,12 @@ export class ReeClient {
    * @param runeId - The rune ID to get balance for (format: "block:index")
    * @returns Rune balance as a number, or undefined if rune not found
    */
-  async getRuneBalance(runeId: string): Promise<number | undefined> {
+  async getRuneBalance(
+    address: string,
+    runeId: string
+  ): Promise<number | undefined> {
     const [runeUtxos, runeInfo] = await Promise.all([
-      this.getRuneUtxos(runeId),
+      this.getRuneUtxos(address, runeId),
       this.getRuneInfo(runeId),
     ]);
 
@@ -346,6 +359,8 @@ export class ReeClient {
    * @returns Transaction builder instance
    */
   async createTransaction({
+    address,
+    paymentAddress,
     runeId,
     poolAddress,
     sendBtcAmount,
@@ -354,6 +369,8 @@ export class ReeClient {
     receiveRuneAmount,
   }: {
     runeId?: string;
+    address: string;
+    paymentAddress: string;
     poolAddress: string;
     sendBtcAmount: bigint;
     sendRuneAmount: bigint;
@@ -362,8 +379,8 @@ export class ReeClient {
   }) {
     // Fetch required data in parallel
     const [btcUtxos, runeUtxos, poolInfo] = await Promise.all([
-      this.getBtcUtxos(),
-      runeId ? this.getRuneUtxos(runeId) : Promise.resolve([]),
+      this.getBtcUtxos(paymentAddress),
+      runeId ? this.getRuneUtxos(address, runeId) : Promise.resolve([]),
       this.getPoolInfo(poolAddress),
     ]);
 
@@ -389,8 +406,9 @@ export class ReeClient {
     return new Transaction(
       {
         network: this.config.network,
-        address: this.address,
-        paymentAddress: this.paymentAddress,
+        exchangeId: this.config.exchangeId,
+        address,
+        paymentAddress,
         poolAddress,
         runeId,
         sendBtcAmount,

@@ -102,13 +102,13 @@ function App() {
 }
 
 function WalletComponent() {
-  const { 
-    client, 
-    address, 
+  const {
+    client,
+    address,
     updateWallet,
     getBtcBalance,
     getRuneBalance,
-    createTransaction 
+    createTransaction,
   } = useRee();
 
   const [btcBalance, setBtcBalance] = useState<number | null>(null);
@@ -191,20 +191,24 @@ new ReeClient(address: string, paymentAddress: string, config: Config)
 #### Methods
 
 ##### Balance & UTXO Methods
+
 - `getBtcBalance(): Promise<number>` - Get Bitcoin balance in BTC
 - `getBtcUtxos(): Promise<Utxo[]>` - Get Bitcoin UTXOs for the payment address
 - `getRuneBalance(runeId: string): Promise<number | undefined>` - Get balance for a specific rune
 - `getRuneUtxos(runeId: string): Promise<Utxo[]>` - Get UTXOs containing a specific rune
 
 ##### Rune Information Methods
+
 - `searchRunes(keyword: string): Promise<RuneInfo[]>` - Search for runes by keyword or rune ID
 - `getRuneInfo(runeId: string): Promise<RuneInfo | undefined>` - Get detailed information for a specific rune
 
 ##### Pool Methods
+
 - `getPoolList(): Promise<Pool[]>` - Get list of all available liquidity pools
 - `getPoolInfo(poolAddress: string): Promise<PoolInfo>` - Get information about a specific liquidity pool
 
 ##### Transaction Methods
+
 - `createTransaction(params): Promise<Transaction>` - Create a transaction for trading with a liquidity pool
 - `invoke(intentionSet: IntentionSet, signedPsbtHex: string): Promise<any>` - Submit a signed transaction
 
@@ -213,33 +217,111 @@ new ReeClient(address: string, paymentAddress: string, config: Config)
 Transaction builder for Bitcoin and Rune transactions.
 
 #### Methods
+
 - `build(): Promise<{ psbt: bitcoin.Psbt, fee: bigint }>` - Build the PSBT and calculate fees
 - `getIntentionSet(): IntentionSet` - Get the intention set for the transaction
 
 ### React Hooks
 
-#### useRee()
+The SDK provides specialized hooks for all operations:
 
-Returns the current Ree context with client instance and all methods.
+```tsx
+import {
+  useBtcBalance,
+  useRuneBalance,
+  useBtcUtxos,
+  useRuneUtxos,
+  useSearchRunes,
+  useRuneInfo,
+  usePoolList,
+  usePoolInfo,
+} from "@ree-network/ts-sdk";
 
-```typescript
+function TradingDashboard() {
+  // Balance & UTXO hooks
+  const { balance: btcBalance, loading: btcLoading } = useBtcBalance();
+  const { balance: runeBalance } = useRuneBalance("840000:3");
+  const { utxos: btcUtxos } = useBtcUtxos();
+  const { utxos: runeUtxos } = useRuneUtxos("840000:3");
+
+  // Rune search hooks
+  const { runes, search } = useSearchRunes();
+  const { runeInfo } = useRuneInfo("840000:3");
+
+  // Pool hooks
+  const { pools } = usePoolList();
+  const { poolInfo } = usePoolInfo("bc1q...");
+
+  const handleSearch = () => {
+    search("DOG"); // Search for runes containing "DOG"
+  };
+
+  return (
+    <div>
+      <h2>Balances</h2>
+      <div>BTC: {btcBalance} BTC</div>
+      <div>Rune: {runeBalance}</div>
+
+      <h2>Search Runes</h2>
+      <button onClick={handleSearch}>Search DOG</button>
+      <div>{runes.length} runes found</div>
+
+      <h2>Pools</h2>
+      <div>{pools.length} pools available</div>
+    </div>
+  );
+}
+```
+
+#### Available Hooks
+
+**Balance & UTXO Hooks:**
+
+- `useBtcBalance(options?)` - Bitcoin balance management
+- `useRuneBalance(runeId, options?)` - Rune balance for specific rune
+- `useBtcUtxos(options?)` - Bitcoin UTXOs management
+- `useRuneUtxos(runeId, options?)` - Rune UTXOs for specific rune
+
+**Rune Information Hooks:**
+
+- `useSearchRunes(keyword?, options?)` - Search runes by keyword
+- `useRuneInfo(runeId?, options?)` - Get rune information by ID
+
+**Pool Hooks:**
+
+- `usePoolList(options?)` - Get all available pools
+- `usePoolInfo(poolAddress?, options?)` - Get specific pool information
+
+#### Hook Usage Examples
+
+```tsx
+// Search runes with auto-search
+const { runes, loading, search } = useSearchRunes("DOG", { autoRefresh: true });
+
+// Get rune info with polling
+const { runeInfo } = useRuneInfo("840000:3", { refreshInterval: 30000 });
+
+// Get pools with manual refresh only
+const { pools, refetch } = usePoolList({ autoRefresh: false });
+
+// Search manually
+const { runes, search } = useSearchRunes();
+await search("BITCOIN");
+```
+
+### Core useRee Hook
+
+The `useRee()` hook now focuses on core functionality:
+
+```tsx
 const {
-  client,              // ReeClient instance or null
-  address,             // Current Bitcoin address
-  paymentAddress,      // Current payment address
-  updateWallet,        // Function to update wallet state
-  
-  // All client methods are available directly
-  getBtcBalance,
-  getBtcUtxos,
-  getRuneBalance,
-  getRuneUtxos,
-  searchRunes,
-  getRuneInfo,
-  getPoolList,
-  getPoolInfo,
-  createTransaction,
-  invoke,
+  client, // Direct access to ReeClient
+  address, // Current Bitcoin address
+  paymentAddress, // Current payment address
+  updateWallet, // Update wallet addresses
+  exchange, // Exchange canister actor
+  createTransaction, // Create transactions
+  invoke, // Submit transactions
 } = useRee();
 ```
 
@@ -248,7 +330,7 @@ const {
 The SDK exports all necessary TypeScript types:
 
 ```typescript
-import type { 
+import type {
   Config,
   Utxo,
   RuneInfo,
@@ -257,7 +339,7 @@ import type {
   IntentionSet,
   Intention,
   TransactionConfig,
-  AddressType 
+  AddressType,
 } from "@ree-network/ts-sdk";
 ```
 
@@ -265,10 +347,10 @@ import type {
 
 ```typescript
 interface Config {
-  network: Network;                    // Network.Mainnet or Network.Testnet
-  maestroApiKey: string;              // Your Maestro API key
+  network: Network; // Network.Mainnet or Network.Testnet
+  maestroApiKey: string; // Your Maestro API key
   exchangeIdlFactory: IDL.InterfaceFactory; // Exchange canister IDL
-  exchangeCanisterId: string;         // Exchange canister ID
+  exchangeCanisterId: string; // Exchange canister ID
 }
 ```
 
@@ -277,7 +359,7 @@ interface Config {
 ```typescript
 enum Network {
   Mainnet = "mainnet",
-  Testnet = "testnet"
+  Testnet = "testnet",
 }
 ```
 

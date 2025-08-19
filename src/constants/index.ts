@@ -3,6 +3,8 @@ export const ORCHESTRATOR_CANISTER_ID_TESTNET = "hvyp5-5yaaa-aaaao-qjxha-cai";
 
 export const UTXO_DUST = BigInt(547);
 
+export const BITCOIN_ID = "0:0";
+
 export const RUNES_INDEXER_URL =
   "https://runescan-hasura-mainnet.omnity.network/v1/graphql";
 

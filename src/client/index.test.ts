@@ -11,22 +11,17 @@ const mockConfig: Config = {
   network: Network.Testnet,
   maestroApiKey: "test-api-key",
   exchangeIdlFactory: vi.fn(),
+  exchangeId: "test-id",
   exchangeCanisterId: "test-canister-id",
 };
 
 describe("ReeClient", () => {
   let client: ReeClient;
-  const testAddress = "bc1qtest";
+
   const testPaymentAddress = "bc1qpayment";
 
   beforeEach(() => {
-    client = new ReeClient(testAddress, testPaymentAddress, mockConfig);
-  });
-
-  it("should initialize with correct addresses", () => {
-    expect(client.address).toBe(testAddress);
-    expect(client.paymentAddress).toBe(testPaymentAddress);
-    expect(client.config).toBe(mockConfig);
+    client = new ReeClient(mockConfig);
   });
 
   it("should create maestro instance with correct config", () => {
@@ -72,7 +67,7 @@ describe("ReeClient", () => {
           last_updated: { block_hash: "hash", block_height: BigInt(100) },
         });
 
-      const result = await client.getBtcUtxos();
+      const result = await client.getBtcUtxos(testPaymentAddress);
 
       expect(result).toEqual(mockUtxos);
       expect(client.maestro.utxosByAddress).toHaveBeenCalledTimes(2);

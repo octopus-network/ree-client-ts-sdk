@@ -8,6 +8,8 @@ export * from "./react";
 export type { Config } from "./types/config";
 export { Network } from "./types/network";
 
+export * as utils from "./utils";
+
 export type { Utxo } from "./types/utxo";
 export type { RuneInfo } from "./types/rune";
 export type { Pool, PoolInfo } from "./types/pool";

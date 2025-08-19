@@ -3,6 +3,7 @@ import type { Utxo } from "./utxo";
 
 export interface TransactionConfig {
   network: Network;
+  exchangeId: string;
   address: string;
   paymentAddress: string;
   poolAddress: string;
