@@ -1,4 +1,4 @@
-# Ree Typescript SDK
+# Ree Client TypesSript SDK
 
 A TypeScript SDK for interacting with the Ree protocol on Bitcoin, providing seamless integration with Bitcoin wallets and Rune tokens.
 
@@ -14,7 +14,7 @@ A TypeScript SDK for interacting with the Ree protocol on Bitcoin, providing sea
 ## Installation
 
 ```bash
-npm install @ree-network/ts-sdk
+npm install @omnity/ree-client-ts-sdk
 ```
 
 ## Quick Start
@@ -22,7 +22,7 @@ npm install @ree-network/ts-sdk
 ### Initializing the Client
 
 ```typescript
-import { ReeClient, Network, type Config } from "@ree-network/ts-sdk";
+import { ReeClient, Network, type Config } from "@omnity/ree-client-ts-sdk";
 
 const config: Config = {
   network: Network.Testnet,
