@@ -261,12 +261,12 @@ export function useRuneUtxos(runeId: string, options: UseBalanceOptions = {}) {
  * @param keyword - Search term (rune ID or partial name)
  * @returns Object with runes, loading state, error, and search function
  */
-export function useSearchRunes(keyword?: string) {
+export function useSearchRunes() {
   const { client } = useRee();
 
   const searchRunes = useCallback(
     async (searchKeyword?: string) => {
-      const searchTerm = searchKeyword || keyword;
+      const searchTerm = searchKeyword;
       if (!searchTerm) {
         throw new Error("Search keyword is required");
       }
@@ -274,7 +274,7 @@ export function useSearchRunes(keyword?: string) {
       const results = await client.searchRunes(searchTerm);
       return results;
     },
-    [client, keyword]
+    [client]
   );
 
   return searchRunes;

@@ -255,8 +255,10 @@ function TradingDashboard() {
   const { utxos: btcUtxos } = useBtcUtxos();
   const { utxos: runeUtxos } = useRuneUtxos("840000:3");
 
+  const [runes, setRunes] = useState([]);
+
   // Rune search hooks
-  const { runes, search } = useSearchRunes();
+  const searchRunes = useSearchRunes();
   const { runeInfo } = useRuneInfo("840000:3");
 
   // Pool hooks
@@ -264,7 +266,7 @@ function TradingDashboard() {
   const { poolInfo } = usePoolInfo("bc1q...");
 
   const handleSearch = () => {
-    search("DOG"); // Search for runes containing "DOG"
+    searchRunes("DOG").then(setRunes); // Search for runes containing "DOG"
   };
 
   return (
