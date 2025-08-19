@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, act } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { ReeProvider, useRee } from "./ReeProvider";
 import type { Config } from "../types/config";
 import { Network } from "../types/network";
@@ -9,68 +9,42 @@ const mockConfig: Config = {
   maestroApiKey: "test-key",
   exchangeIdlFactory: vi.fn(),
   exchangeId: "test-id",
-  exchangeCanisterId: "test-id",
+  exchangeCanisterId: "test-canister-id",
 };
 
 function TestComponent() {
-  const { address, paymentAddress, updateWallet } = useRee();
-
-  return (
-    <div>
-      <div data-testid="address">{address}</div>
-      <div data-testid="payment-address">{paymentAddress}</div>
-
-      <button
-        onClick={() =>
-          updateWallet({
-            address: "bc1qtest",
-            paymentAddress: "bc1qpayment",
-          })
-        }
-        data-testid="update-wallet"
-      >
-        Update Wallet
-      </button>
-    </div>
-  );
+  const { client } = useRee();
+  return <div data-testid="client">{client ? "ready" : "not-ready"}</div>;
 }
 
 describe("ReeProvider", () => {
-  it("should provide initial empty state", () => {
+  it("should render children", () => {
+    render(
+      <ReeProvider config={mockConfig}>
+        <div data-testid="child">Test Child</div>
+      </ReeProvider>
+    );
+
+    expect(screen.getByTestId("child")).toHaveTextContent("Test Child");
+  });
+
+  it("should provide client instance", () => {
     render(
       <ReeProvider config={mockConfig}>
         <TestComponent />
       </ReeProvider>
     );
 
-    expect(screen.getByTestId("address")).toHaveTextContent("");
-    expect(screen.getByTestId("payment-address")).toHaveTextContent("");
-    expect(screen.getByTestId("client-status")).toHaveTextContent(
-      "disconnected"
-    );
+    expect(screen.getByTestId("client")).toHaveTextContent("ready");
   });
 
-  it("should update wallet state and create client", async () => {
-    render(
-      <ReeProvider config={mockConfig}>
-        <TestComponent />
-      </ReeProvider>
-    );
+  it("should throw error when used outside provider", () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    await act(async () => {
-      screen.getByTestId("update-wallet").click();
-    });
+    expect(() => {
+      render(<TestComponent />);
+    }).toThrow("useRee must be used within ReeProvider");
 
-    expect(screen.getByTestId("address")).toHaveTextContent("bc1qtest");
-    expect(screen.getByTestId("payment-address")).toHaveTextContent(
-      "bc1qpayment"
-    );
-    expect(screen.getByTestId("client-status")).toHaveTextContent("connected");
+    consoleSpy.mockRestore();
   });
-
-  // it('should throw error when useRee is used outside provider', () => {
-  //   expect(() => {
-  //     render(<TestComponent />);
-  //   }).toThrow('useRee must be used within ReeProvider');
-  // });
 });

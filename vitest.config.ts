@@ -7,5 +7,13 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
     globals: true,
+    env: {
+      NODE_ENV: "test",
+    },
+    clearMocks: true,
+    restoreMocks: true,
+  },
+  define: {
+    "process.env.NODE_ENV": '"test"',
   },
 });

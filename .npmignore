@@ -1,0 +1,41 @@
+# Source files
+src/
+*.ts
+!dist/**/*.d.ts
+
+# Development files
+.vscode/
+.idea/
+*.log
+.env*
+
+# Test files
+**/*.test.*
+**/*.spec.*
+test/
+tests/
+coverage/
+
+# Build tools
+vite.config.ts
+vitest.config.ts
+tsconfig.json
+.eslintrc*
+.prettierrc*
+
+# Git
+.git/
+.gitignore
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# Documentation (keep README.md)
+docs/
+*.md
+!README.md
+
+# Dependencies
+node_modules/

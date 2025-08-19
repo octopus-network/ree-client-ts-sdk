@@ -1,6 +1,30 @@
 {
-  "name": "@ree-network/ts-sdk",
-  "version": "0.1.0",
+  "name": "@omnity/ree-ts-sdk",
+  "version": "0.1.1",
+  "description": "A TypeScript SDK for interacting with the Ree protocol on Bitcoin",
+  "keywords": [
+    "bitcoin",
+    "runes",
+    "typescript",
+    "sdk",
+    "ree",
+    "defi"
+  ],
+  "author": "Octopus Network",
+  "license": "MIT",
+  "homepage": "https://github.com/octopus-network/ree-ts-sdk#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/octopus-network/ree-ts-sdk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/octopus-network/ree-ts-sdk/issues"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "type": "module",
   "main": "./dist/ree-sdk.umd.cjs",
   "module": "./dist/ree-sdk.js",
@@ -22,7 +46,10 @@
     "preview": "vite preview",
     "test": "vitest",
     "test:ui": "vitest --ui",
-    "coverage": "vitest run --coverage"
+    "coverage": "vitest run --coverage",
+    "prepublishOnly": "npm run test && npm run build",
+    "publish:beta": "npm publish --tag beta",
+    "publish:latest": "npm publish"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.1.0",
