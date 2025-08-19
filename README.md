@@ -31,29 +31,25 @@ const config: Config = {
   exchangeCanisterId: "your-canister-id",
 };
 
-const client = new ReeClient(
-  "bc1q...", // Bitcoin address
-  "bc1q...", // Payment address
-  config
-);
+const client = new ReeClient(config);
 ```
 
 ### Basic Usage
 
 ```typescript
 // Get Bitcoin UTXOs
-const utxos = await client.getBtcUtxos();
+const utxos = await client.getBtcUtxos("bc1q..."); // payment address
 
 // Get Rune UTXOs
-const runeUtxos = await client.getRuneUtxos("RUNE_ID");
+const runeUtxos = await client.getRuneUtxos("bc1q...", "RUNE_ID"); // address, runeId
 
 // Get Rune Info
 const runeInfo = await client.getRuneInfo("RUNE_ID");
 
 // Get Bitcoin Balance
-const btcBalance = await client.getBtcBalance();
+const btcBalance = await client.getBtcBalance("bc1q..."); // payment address
 
-const runeBalance = await client.getRuneBalance("RUNE_ID");
+const runeBalance = await client.getRuneBalance("bc1q...", "RUNE_ID"); // address, runeId
 
 // Search for runes
 const runes = await client.searchRunes("DOG");
@@ -68,6 +64,8 @@ const poolInfo = await client.getPoolInfo("pool-address");
 ```typescript
 // Create a swap transaction
 const transaction = await client.createTransaction({
+  address: "bc1q...", // Bitcoin address
+  paymentAddress: "bc1q...", // Payment address
   poolAddress: "bc1q...",
   sendBtcAmount: BigInt(100000), // 0.001 BTC in satoshis
   sendRuneAmount: BigInt(0),
@@ -76,22 +74,19 @@ const transaction = await client.createTransaction({
 });
 
 // Build the transaction
-const { psbt, fee } = await transaction.build();
+const psbt = await transaction.build("swap", BigInt(Date.now()));
 
 // Sign with your wallet (implementation depends on wallet)
 const signedPsbt = await wallet.signPsbt(psbt);
 
 // Submit the transaction
-const result = await client.invoke(
-  transaction.getIntentionSet(),
-  signedPsbt.toHex()
-);
+const result = await transaction.send(signedPsbt.toHex());
 ```
 
 ### React Integration
 
 ```tsx
-import { ReeProvider, useRee } from "@ree-network/ts-sdk";
+import { ReeProvider, useRee, useBtcBalance } from "@ree-network/ts-sdk";
 
 function App() {
   return (
@@ -102,16 +97,9 @@ function App() {
 }
 
 function WalletComponent() {
-  const {
-    client,
-    address,
-    updateWallet,
-    getBtcBalance,
-    getRuneBalance,
-    createTransaction,
-  } = useRee();
+  const { client, address, updateWallet } = useRee();
 
-  const [btcBalance, setBtcBalance] = useState<number | null>(null);
+  const { balance: btcBalance } = useBtcBalance();
 
   const connectWallet = () => {
     updateWallet({
@@ -120,22 +108,11 @@ function WalletComponent() {
     });
   };
 
-  const loadBalance = async () => {
-    if (client) {
-      const balance = await getBtcBalance();
-      setBtcBalance(balance);
-    }
-  };
-
-  if (!client) {
-    return <button onClick={connectWallet}>Connect Wallet</button>;
-  }
-
   return (
     <div>
       <div>Connected: {address}</div>
       <div>Balance: {btcBalance} BTC</div>
-      <button onClick={loadBalance}>Load Balance</button>
+      <button onClick={connectWallet}>Connect wallet</button>
     </div>
   );
 }
@@ -151,28 +128,63 @@ function App() {
   return (
     <LaserEyesProvider config={laserEyesConfig}>
       <ReeProvider config={reeConfig}>
-        <ReeWrapper>
-          <MyComponent />
-        </ReeWrapper>
+        <ConnectWalletModal />
+        <MyComponent />
       </ReeProvider>
     </LaserEyesProvider>
   );
 }
 
-function ReeWrapper({ children }) {
-  const { address, paymentAddress, connected } = useLaserEyes();
+function MyComponent({ children }) {
+  const { signPsbt } = useLaserEyes();
+  const { updateWallet, createTransaction, exchange } = useRee();
+
+  const sendTransaction = async () => {
+    const depositBtcAmount = BigInt(100000);
+    const depositOffer = await exchange.pre_deposit("bc1q...", {
+      id: "0:0",
+      value: depositBtcAmount,
+    });
+
+    const tx = await createTransaction({
+      poolAddress: "bc1q...",
+      sendBtcAmount: depositBtcAmount,
+      sendRuneAmount: BigInt(0),
+      receiveBtcAmount: BigInt(0),
+      receiveRuneAmount: BigInt(0),
+    });
+
+    const psbt = await tx.build("deposit", depositOffer.nonce);
+
+    const signedPsbt = await signPsbt(psbt);
+    const txid = await tx.send(signedPsbt.toHex());
+
+    console.log("Transaction sent:", txid);
+  };
+
+  return (
+    <div>
+      <button onClick={sendTransaction}>Send Transaction</button>
+    </div>
+  );
+}
+
+function ConnectWalletModal() {
+  const { address, paymentAddress, connect } = useLaserEyes();
   const { updateWallet } = useRee();
 
   useEffect(() => {
-    if (connected) {
-      updateWallet({
-        address,
-        paymentAddress,
-      });
-    }
-  }, [address, paymentAddress, connected, updateWallet]);
+    updateWallet({
+      address,
+      paymentAddress,
+    });
+  }, [address, paymentAddress, updateWallet]);
 
-  return <>{children}</>;
+  return (
+    <div>
+      <button onClick={connect}>Connect Wallet</button>
+    </div>
+  );
 }
 ```
 
@@ -185,17 +197,17 @@ The main client class for interacting with the Ree protocol.
 #### Constructor
 
 ```typescript
-new ReeClient(address: string, paymentAddress: string, config: Config)
+new ReeClient(config: Config)
 ```
 
 #### Methods
 
 ##### Balance & UTXO Methods
 
-- `getBtcBalance(): Promise<number>` - Get Bitcoin balance in BTC
-- `getBtcUtxos(): Promise<Utxo[]>` - Get Bitcoin UTXOs for the payment address
-- `getRuneBalance(runeId: string): Promise<number | undefined>` - Get balance for a specific rune
-- `getRuneUtxos(runeId: string): Promise<Utxo[]>` - Get UTXOs containing a specific rune
+- `getBtcBalance(paymentAddress: string): Promise<number>` - Get Bitcoin balance in BTC
+- `getBtcUtxos(paymentAddress: string): Promise<Utxo[]>` - Get Bitcoin UTXOs for the payment address
+- `getRuneBalance(address: string, runeId: string): Promise<number | undefined>` - Get balance for a specific rune
+- `getRuneUtxos(address: string, runeId: string): Promise<Utxo[]>` - Get UTXOs containing a specific rune
 
 ##### Rune Information Methods
 
@@ -210,7 +222,6 @@ new ReeClient(address: string, paymentAddress: string, config: Config)
 ##### Transaction Methods
 
 - `createTransaction(params): Promise<Transaction>` - Create a transaction for trading with a liquidity pool
-- `invoke(intentionSet: IntentionSet, signedPsbtHex: string): Promise<any>` - Submit a signed transaction
 
 ### Transaction
 
@@ -218,8 +229,8 @@ Transaction builder for Bitcoin and Rune transactions.
 
 #### Methods
 
-- `build(): Promise<{ psbt: bitcoin.Psbt, fee: bigint }>` - Build the PSBT and calculate fees
-- `getIntentionSet(): IntentionSet` - Get the intention set for the transaction
+- `build(action: string, nonce: bigint, actionParams?: string): Promise<bitcoin.Psbt>` - Build the PSBT
+- `send(signedPsbtHex: string): Promise<any>` - Submit the signed transaction to orchestrator
 
 ### React Hooks
 
@@ -321,7 +332,6 @@ const {
   updateWallet, // Update wallet addresses
   exchange, // Exchange canister actor
   createTransaction, // Create transactions
-  invoke, // Submit transactions
 } = useRee();
 ```
 
@@ -351,6 +361,7 @@ interface Config {
   maestroApiKey: string; // Your Maestro API key
   exchangeIdlFactory: IDL.InterfaceFactory; // Exchange canister IDL
   exchangeCanisterId: string; // Exchange canister ID
+  exchangeId: string; // Exchange ID for transactions
 }
 ```
 
@@ -367,17 +378,17 @@ enum Network {
 
 ```typescript
 try {
-  const utxos = await client.getBtcUtxos();
+  const utxos = await client.getBtcUtxos("bc1q...");
 } catch (error) {
   console.error("Failed to fetch UTXOs:", error);
 }
 
 // React hook error handling
-const { getBtcBalance } = useRee();
+const { client } = useRee();
 
 const loadBalance = async () => {
   try {
-    const balance = await getBtcBalance();
+    const balance = await client.getBtcBalance("bc1q...");
     setBalance(balance);
   } catch (error) {
     console.error("Failed to load balance:", error);
@@ -385,49 +396,3 @@ const loadBalance = async () => {
   }
 };
 ```
-
-## Testing
-
-```bash
-# Run tests
-npm test
-
-# Run tests with UI
-npm run test:ui
-
-# Generate coverage report
-npm run coverage
-```
-
-## Development
-
-```bash
-# Install dependencies
-npm install
-
-# Start development server
-npm run dev
-
-# Build the library
-npm run build
-
-# Preview the build
-npm run preview
-```
-
-## License
-
-MIT
-
-## Contributing
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## Support
-
-- [Documentation](https://docs.omnity.network/docs/REE/introduction)
-- [GitHub Issues](https://github.com/octopus-network/ree-ts-sdk/issues)

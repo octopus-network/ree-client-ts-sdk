@@ -1,6 +1,6 @@
 {
   "name": "@ree-network/ts-sdk",
-  "version": "0.0.3",
+  "version": "0.1.0",
   "type": "module",
   "main": "./dist/ree-sdk.umd.cjs",
   "module": "./dist/ree-sdk.js",

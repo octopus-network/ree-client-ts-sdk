@@ -8,7 +8,7 @@ import {
 } from "react";
 
 import { ReeClient } from "../client";
-import type { IntentionSet } from "../types/orchestrator";
+
 import type { Config } from "../types/config";
 
 import { Transaction } from "../lib/transaction";
@@ -29,7 +29,6 @@ interface ReeContextValue {
     receiveBtcAmount: bigint;
     receiveRuneAmount: bigint;
   }) => Promise<Transaction>;
-  invoke: (intentionSet: IntentionSet, signedPsbtHex: string) => Promise<any>;
 }
 
 const ReeContext = createContext<ReeContextValue | null>(null);
@@ -97,14 +96,6 @@ export function ReeProvider({ children, config }: ReeProviderProps) {
     [client, wallet]
   );
 
-  const invoke = useCallback(
-    async (intentionSet: IntentionSet, signedPsbtHex: string) => {
-      if (!client) throw new Error("Client not available");
-      return client.invoke(intentionSet, signedPsbtHex);
-    },
-    [client]
-  );
-
   const contextValue = useMemo(
     () => ({
       client,
@@ -112,9 +103,8 @@ export function ReeProvider({ children, config }: ReeProviderProps) {
       exchange: client.exchange,
       updateWallet,
       createTransaction,
-      invoke,
     }),
-    [client, wallet, updateWallet, createTransaction, invoke]
+    [client, wallet, updateWallet, createTransaction]
   );
 
   return (

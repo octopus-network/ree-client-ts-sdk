@@ -28,6 +28,8 @@ export class Transaction {
   /** Orchestrator actor for fee estimation */
   readonly orchestrator: ActorSubclass;
 
+  private intentionSet: IntentionSet | null = null;
+
   constructor(config: TransactionConfig, orchestrator: ActorSubclass) {
     this.config = config;
 
@@ -389,7 +391,7 @@ export class Transaction {
     action: string,
     nonce: bigint,
     actionParams?: string
-  ): Promise<{ psbt: bitcoin.Psbt; intentionSet: IntentionSet }> {
+  ): Promise<bitcoin.Psbt> {
     const {
       runeId: runeIdStr,
       sendRuneAmount,
@@ -449,26 +451,25 @@ export class Transaction {
         });
       }
 
-      return {
-        psbt: this.psbt,
-        intentionSet: {
-          tx_fee_in_sats: discardedSats + currentFee,
-          initiator_address: paymentAddress,
-          intentions: [
-            {
-              action,
-              exchange_id: this.config.exchangeId,
-              input_coins: inputCoins,
-              pool_utxo_spent: [],
-              pool_utxo_received: [],
-              output_coins: outputCoins,
-              pool_address: poolAddress,
-              action_params: actionParams ?? "",
-              nonce,
-            },
-          ],
-        },
+      this.intentionSet = {
+        tx_fee_in_sats: discardedSats + currentFee,
+        initiator_address: paymentAddress,
+        intentions: [
+          {
+            action,
+            exchange_id: this.config.exchangeId,
+            input_coins: inputCoins,
+            pool_utxo_spent: [],
+            pool_utxo_received: [],
+            output_coins: outputCoins,
+            pool_address: poolAddress,
+            action_params: actionParams ?? "",
+            nonce,
+          },
+        ],
       };
+
+      return this.psbt;
     }
 
     // Handle Rune transaction logic
@@ -561,25 +562,75 @@ export class Transaction {
       });
     }
 
-    return {
-      psbt: this.psbt,
-      intentionSet: {
-        tx_fee_in_sats: discardedSats + currentFee,
-        initiator_address: paymentAddress,
-        intentions: [
-          {
-            action,
-            exchange_id: this.config.exchangeId,
-            input_coins: inputCoins,
-            pool_utxo_spent: [],
-            pool_utxo_received: [],
-            output_coins: outputCoins,
-            pool_address: poolAddress,
-            action_params: actionParams ?? "",
-            nonce,
-          },
-        ],
-      },
+    this.intentionSet = {
+      tx_fee_in_sats: discardedSats + currentFee,
+      initiator_address: paymentAddress,
+      intentions: [
+        {
+          action,
+          exchange_id: this.config.exchangeId,
+          input_coins: inputCoins,
+          pool_utxo_spent: [],
+          pool_utxo_received: [],
+          output_coins: outputCoins,
+          pool_address: poolAddress,
+          action_params: actionParams ?? "",
+          nonce,
+        },
+      ],
     };
+
+    return this.psbt;
+  }
+
+  /**
+   * Submit the signed transaction to the orchestrator for execution
+   * This method sends the signed PSBT along with the intention set to the orchestrator canister
+   *
+   * @param signedPsbtHex - The signed PSBT in hexadecimal format from the user's wallet
+   * @returns Promise that resolves to the orchestrator's response on success
+   * @throws Error if intention set is not available or if the orchestrator returns an error
+   *
+   * @example
+   * ```typescript
+   * // After building and signing the transaction
+   * const signedPsbt = await wallet.signPsbt(psbt);
+   * const result = await transaction.send(signedPsbt.toHex());
+   * ```
+   */
+  async send(signedPsbtHex: string) {
+    if (!this.intentionSet) {
+      throw new Error("Intention set not available");
+    }
+    return (
+      this.orchestrator
+        .invoke({
+          intention_set: this.intentionSet,
+          initiator_utxo_proof: [],
+          psbt_hex: signedPsbtHex,
+        })
+        // eslint-disable-next-line
+        .then((data: any) => {
+          if (data?.Ok) {
+            return data.Ok;
+          } else {
+            // Parse and format error messages
+            const error = data?.Err ?? {};
+            const key = Object.keys(error)[0];
+            const message = error[key];
+
+            throw new Error(
+              message
+                ? key === "ErrorOccurredDuringExecution"
+                  ? `${key}: ${
+                      message.execution_steps?.[0]?.result?.Err ??
+                      "Unknown Error"
+                    }`
+                  : `Invoke Error: ${JSON.stringify(data)}`
+                : `Invoke Error: ${JSON.stringify(data)}`
+            );
+          }
+        })
+    );
   }
 }

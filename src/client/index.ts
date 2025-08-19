@@ -7,7 +7,7 @@ import { type ActorSubclass, Actor, HttpAgent } from "@dfinity/agent";
 import { Transaction } from "../lib/transaction";
 import type { Utxo } from "../types/utxo";
 import { bytesToHex, getScriptByAddress } from "../utils";
-import type { IntentionSet } from "../types/orchestrator";
+
 import { gql, GraphQLClient } from "graphql-request";
 import type { RuneInfo } from "../types/rune";
 import Decimal from "decimal.js";
@@ -420,46 +420,6 @@ export class ReeClient {
         poolUtxos,
       },
       this.orchestrator
-    );
-  }
-
-  /**
-   * Submit a signed transaction to the orchestrator for execution
-   * @param intentionSet - The intention set describing the transaction
-   * @param signedPsbtHex - Hex-encoded signed PSBT
-   * @returns Transaction result from orchestrator
-   * @throws Error if transaction fails or is rejected
-   */
-  async invoke(intentionSet: IntentionSet, signedPsbtHex: string) {
-    return (
-      this.orchestrator
-        .invoke({
-          intention_set: intentionSet,
-          initiator_utxo_proof: [],
-          psbt_hex: signedPsbtHex,
-        })
-        // eslint-disable-next-line
-        .then((data: any) => {
-          if (data?.Ok) {
-            return data.Ok;
-          } else {
-            // Parse and format error messages
-            const error = data?.Err ?? {};
-            const key = Object.keys(error)[0];
-            const message = error[key];
-
-            throw new Error(
-              message
-                ? key === "ErrorOccurredDuringExecution"
-                  ? `${key}: ${
-                      message.execution_steps?.[0]?.result?.Err ??
-                      "Unknown Error"
-                    }`
-                  : `Invoke Error: ${JSON.stringify(data)}`
-                : `Invoke Error: ${JSON.stringify(data)}`
-            );
-          }
-        })
     );
   }
 }
