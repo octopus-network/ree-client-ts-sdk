@@ -305,7 +305,7 @@ export class ReeClient {
 
     return amount > BigInt(0)
       ? new Decimal(amount.toString())
-          .div(Math.pow(runeInfo.divisibility, 10))
+          .div(Math.pow(10, runeInfo.divisibility))
           .toNumber()
       : 0;
   }

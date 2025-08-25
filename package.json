@@ -1,6 +1,6 @@
 {
   "name": "@omnity/ree-client-ts-sdk",
-  "version": "0.1.1",
+  "version": "0.1.3",
   "description": "A TypeScript SDK for interacting with the Ree protocol on Bitcoin",
   "keywords": [
     "bitcoin",
@@ -31,6 +31,7 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/ree-sdk.js",
       "require": "./dist/ree-sdk.umd.cjs"
     }

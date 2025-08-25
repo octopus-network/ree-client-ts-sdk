@@ -266,7 +266,7 @@ function TradingDashboard() {
   const { poolInfo } = usePoolInfo("bc1q...");
 
   const handleSearch = () => {
-    searchRunes("DOG").then(setRunes); // Search for runes containing "DOG"
+    searchRunes("IRCH").then(setRunes); // Search for runes containing "RICH"
   };
 
   return (
@@ -308,8 +308,6 @@ function TradingDashboard() {
 #### Hook Usage Examples
 
 ```tsx
-// Search runes with auto-search
-const { runes, loading, search } = useSearchRunes("DOG", { autoRefresh: true });
 
 // Get rune info with polling
 const { runeInfo } = useRuneInfo("840000:3", { refreshInterval: 30000 });
@@ -317,9 +315,9 @@ const { runeInfo } = useRuneInfo("840000:3", { refreshInterval: 30000 });
 // Get pools with manual refresh only
 const { pools, refetch } = usePoolList({ autoRefresh: false });
 
-// Search manually
-const { runes, search } = useSearchRunes();
-await search("BITCOIN");
+// Search runes
+const searchRuens = useSearchRunes();
+await searchRunes("RICH");
 ```
 
 ### Core useRee Hook
