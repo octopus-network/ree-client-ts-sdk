@@ -287,27 +287,20 @@ export class ReeClient {
     address: string,
     runeId: string
   ): Promise<number | undefined> {
-    const [runeUtxos, runeInfo] = await Promise.all([
-      this.getRuneUtxos(address, runeId),
-      this.getRuneInfo(runeId),
-    ]);
+    const runeUtxos = await this.getRuneUtxos(address, runeId);
 
-    if (!runeUtxos || !runeInfo) {
+    if (!runeUtxos) {
       return undefined;
     }
 
-    let amount = BigInt(0);
+    let amount = new Decimal(0);
     for (const utxo of runeUtxos) {
-      amount += BigInt(
-        utxo.runes.find((rune) => rune.id === runeId)?.amount ?? 0
+      amount = amount.add(
+        new Decimal(utxo.runes.find((rune) => rune.id === runeId)?.amount ?? 0)
       );
     }
 
-    return amount > BigInt(0)
-      ? new Decimal(amount.toString())
-          .div(Math.pow(10, runeInfo.divisibility))
-          .toNumber()
-      : 0;
+    return amount.toNumber();
   }
 
   /**
@@ -348,58 +341,57 @@ export class ReeClient {
 
   /**
    * Create a transaction for trading with a liquidity pool
-   * Supports both BTC-only and BTC-Rune swaps
    * @param params - Transaction parameters
-   * @param params.runeId - Optional rune ID for rune swaps
-   * @param params.poolAddress - Target pool address
-   * @param params.sendBtcAmount - BTC amount to send
-   * @param params.sendRuneAmount - Rune amount to send (0 for BTC-only)
-   * @param params.receiveBtcAmount - Expected BTC to receive
-   * @param params.receiveRuneAmount - Expected rune amount to receive
-   * @returns Transaction builder instance
+   * @param params.address - Bitcoin address
+   * @param params.paymentAddress - Ordinals address
+   * @param params.involvedRuneId - Optional rune ID for rune swaps
+   * @returns Transaction instance
    */
   async createTransaction({
     address,
     paymentAddress,
-    runeId,
-    poolAddress,
-    sendBtcAmount,
-    sendRuneAmount,
-    receiveBtcAmount,
-    receiveRuneAmount,
+    involvedRuneIds,
+    involvedPoolAddresses,
   }: {
-    runeId?: string;
     address: string;
     paymentAddress: string;
-    poolAddress: string;
-    sendBtcAmount: bigint;
-    sendRuneAmount: bigint;
-    receiveBtcAmount: bigint;
-    receiveRuneAmount: bigint;
+    involvedRuneIds?: string[];
+    involvedPoolAddresses: string[];
   }) {
     // Fetch required data in parallel
-    const [btcUtxos, runeUtxos, poolInfo] = await Promise.all([
+    const [btcUtxos, runeUtxos, poolInfos] = await Promise.all([
       this.getBtcUtxos(paymentAddress),
-      runeId ? this.getRuneUtxos(address, runeId) : Promise.resolve([]),
-      this.getPoolInfo(poolAddress),
+      involvedRuneIds
+        ? Promise.all(
+            involvedRuneIds.map((runeId) => this.getRuneUtxos(address, runeId))
+          )
+        : Promise.resolve([]),
+      Promise.all(
+        involvedPoolAddresses.map((poolAddress) =>
+          this.getPoolInfo(poolAddress)
+        )
+      ),
     ]);
 
-    // Transform pool UTXOs to internal format
-    const poolUtxos: Utxo[] = poolInfo.utxos.map(
-      ({ txid, vout, coins, sats }) => {
-        const scriptPk = getScriptByAddress(poolAddress, this.config.network);
-        return {
-          txid,
-          vout,
-          address: poolAddress,
-          runes: coins.map(({ id, value }) => ({
-            id,
-            amount: value.toString(),
-          })),
-          satoshis: sats.toString(),
-          scriptPk: bytesToHex(scriptPk),
-        };
-      }
+    const involvedPoolUtxos: Record<string, Utxo[]> = Object.fromEntries(
+      poolInfos
+        .map(({ utxos, address }) =>
+          utxos.map(({ txid, vout, coins, sats }) => {
+            const scriptPk = getScriptByAddress(address, this.config.network);
+            return {
+              txid,
+              vout,
+              address,
+              runes: coins.map(({ id, value }) => ({
+                id,
+                amount: value.toString(),
+              })),
+              satoshis: sats.toString(),
+              scriptPk: bytesToHex(scriptPk),
+            };
+          })
+        )
+        .map((poolUtxos, index) => [involvedPoolAddresses[index], poolUtxos])
     );
 
     // Create and return transaction builder
@@ -409,15 +401,13 @@ export class ReeClient {
         exchangeId: this.config.exchangeId,
         address,
         paymentAddress,
-        poolAddress,
-        runeId,
-        sendBtcAmount,
-        sendRuneAmount,
-        receiveBtcAmount,
-        receiveRuneAmount,
         btcUtxos,
-        runeUtxos,
-        poolUtxos,
+        involvedRuneUtxos: involvedRuneIds?.length
+          ? Object.fromEntries(
+              involvedRuneIds.map((runeId, index) => [runeId, runeUtxos[index]])
+            )
+          : undefined,
+        involvedPoolUtxos,
       },
       this.orchestrator
     );

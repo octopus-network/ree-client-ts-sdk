@@ -22,12 +22,8 @@ interface ReeContextValue {
   updateWallet: (wallet: { address?: string; paymentAddress?: string }) => void;
 
   createTransaction: (params: {
-    runeId?: string;
-    poolAddress: string;
-    sendBtcAmount: bigint;
-    sendRuneAmount: bigint;
-    receiveBtcAmount: bigint;
-    receiveRuneAmount: bigint;
+    involvedRuneIds?: string[];
+    involvedPoolAddresses: string[];
   }) => Promise<Transaction>;
 }
 
@@ -76,12 +72,8 @@ export function ReeProvider({ children, config }: ReeProviderProps) {
 
   const createTransaction = useCallback(
     async (params: {
-      runeId?: string;
-      poolAddress: string;
-      sendBtcAmount: bigint;
-      sendRuneAmount: bigint;
-      receiveBtcAmount: bigint;
-      receiveRuneAmount: bigint;
+      involvedRuneIds?: string[];
+      involvedPoolAddresses: string[];
     }) => {
       if (!client) throw new Error("Client not available");
       if (!wallet.address || !wallet.paymentAddress) {

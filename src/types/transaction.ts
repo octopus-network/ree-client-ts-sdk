@@ -6,13 +6,31 @@ export interface TransactionConfig {
   exchangeId: string;
   address: string;
   paymentAddress: string;
-  poolAddress: string;
-  runeId?: string;
-  runeUtxos?: Utxo[];
   btcUtxos: Utxo[];
-  poolUtxos: Utxo[];
-  sendBtcAmount: bigint;
-  sendRuneAmount: bigint;
-  receiveBtcAmount: bigint;
-  receiveRuneAmount: bigint;
+  involvedPoolUtxos: Record<string, Utxo[]>;
+  involvedRuneUtxos?: Record<string, Utxo[]>;
 }
+
+export type CoinBalance = {
+  id: string;
+  value: bigint;
+};
+
+export type InputCoin = {
+  coin: CoinBalance;
+  from: string;
+};
+
+export type OutputCoin = {
+  coin: CoinBalance;
+  to: string;
+};
+
+export type Intention = {
+  inputCoins: CoinBalance[];
+  outputCoins: CoinBalance[];
+  action: string;
+  actionParams?: string;
+  poolAddress: string;
+  nonce: bigint;
+};

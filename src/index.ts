@@ -1,3 +1,4 @@
+import "./utils/polyfills";
 import "./utils/ecc";
 
 export { ReeClient } from "./client";
@@ -14,7 +15,10 @@ export type { Utxo } from "./types/utxo";
 export type { RuneInfo } from "./types/rune";
 export type { Pool, PoolInfo } from "./types/pool";
 
-export type { IntentionSet, Intention } from "./types/orchestrator";
-export type { TransactionConfig } from "./types/transaction";
+export type {
+  TransactionConfig,
+  Intention,
+  CoinBalance,
+} from "./types/transaction";
 
 export type { AddressType } from "./types/address";

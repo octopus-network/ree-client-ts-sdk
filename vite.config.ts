@@ -2,8 +2,10 @@ import { resolve } from "path";
 import { defineConfig } from "vite";
 import dts from "vite-plugin-dts";
 
-// https://vitejs.dev/guide/build.html#library-mode
 export default defineConfig({
+  define: {
+    global: 'globalThis',
+  },
   build: {
     lib: {
       entry: resolve(__dirname, "src/index.ts"),
@@ -11,12 +13,26 @@ export default defineConfig({
       fileName: "ree-sdk",
     },
     rollupOptions: {
-      external: ["react", "react-dom", "react/jsx-runtime"],
+      external: [
+        "react",
+        "react-dom", 
+        "react/jsx-runtime",
+        "@types/react",
+        "@types/react-dom",
+        "bitcoinjs-lib",
+        "@dfinity/agent",
+        "@dfinity/candid",
+        "axios",
+        "graphql",
+      ],
       output: {
         globals: {
           react: "React",
           "react-dom": "ReactDOM",
           "react/jsx-runtime": "React",
+          "bitcoinjs-lib": "bitcoin",
+          axios: "axios",
+          graphql: "GraphQL",
         },
       },
     },
@@ -25,6 +41,21 @@ export default defineConfig({
     dts({
       rollupTypes: true,
       exclude: ["**/*.test.*", "**/*.spec.*"],
+      compilerOptions: {
+        skipLibCheck: true,
+      },
+      beforeWriteFile: (filePath, content) => {
+        const updatedContent = content
+          .replace(
+            /import\([^)]*\/node_modules\/@types\/react[^)]*\)/g,
+            'import("react")'
+          )
+          .replace(
+            /from\s+["'][^"']*\/node_modules\/@types\/react[^"']*["']/g,
+            'from "react"'
+          );
+        return { filePath, content: updatedContent };
+      },
     }),
   ],
 });

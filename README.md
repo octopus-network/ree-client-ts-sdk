@@ -1,4 +1,4 @@
-# Ree Client TypesSript SDK
+# Ree Client TypeScript SDK
 
 A TypeScript SDK for interacting with the Ree protocol on Bitcoin, providing seamless integration with Bitcoin wallets and Rune tokens.
 
@@ -10,6 +10,7 @@ A TypeScript SDK for interacting with the Ree protocol on Bitcoin, providing sea
 - 🔧 **TypeScript**: Full type safety and IntelliSense support
 - 🧪 **Well Tested**: Comprehensive test coverage
 - 📦 **Lightweight**: Minimal dependencies and optimized bundle size
+- 🔄 **Multi-Intention Transactions**: Support for complex transactions with multiple operations
 
 ## Installation
 
@@ -25,10 +26,11 @@ npm install @omnity/ree-client-ts-sdk
 import { ReeClient, Network, type Config } from "@omnity/ree-client-ts-sdk";
 
 const config: Config = {
-  network: Network.Testnet,
+  network: Network.Testnet, // or Network.Mainnet
   maestroApiKey: "your-maestro-api-key",
   exchangeIdlFactory: yourExchangeIdlFactory,
-  exchangeCanisterId: "your-canister-id",
+  exchangeCanisterId: "your-exchange-canister-id",
+  exchangeId: "your-exchange-id",
 };
 
 const client = new ReeClient(config);
@@ -61,32 +63,82 @@ const poolInfo = await client.getPoolInfo("pool-address");
 
 ### Creating and Executing Transactions
 
+#### Simple Single-Pool Transaction
+
 ```typescript
-// Create a swap transaction
+// Create a transaction for a single pool operation
 const transaction = await client.createTransaction({
-  address: "bc1q...", // Bitcoin address
-  paymentAddress: "bc1q...", // Payment address
-  poolAddress: "bc1q...",
-  sendBtcAmount: BigInt(100000), // 0.001 BTC in satoshis
-  sendRuneAmount: BigInt(0),
-  receiveBtcAmount: BigInt(0),
-  receiveRuneAmount: BigInt(1000),
+  address: "bc1q...", // Bitcoin address for runes
+  paymentAddress: "bc1q...", // Payment address for BTC
+  involvedPoolAddresses: ["bc1q..."], // Pool addresses involved
+  involvedRuneIds: ["840000:3"], // Optional: rune IDs if trading runes
 });
 
-// Build the transaction
-const psbt = await transaction.build("swap", BigInt(Date.now()));
+// Add a single intention (e.g., swap BTC for runes)
+transaction.addIntention({
+  poolAddress: "bc1q...",
+  inputCoins: [
+    { id: "0:0", value: BigInt(100000) }, // Send 0.001 BTC
+  ],
+  outputCoins: [
+    { id: "840000:3", value: BigInt(1000) }, // Receive 1000 runes
+  ],
+  action: "swap",
+  nonce: BigInt(1234),
+});
 
-// Sign with your wallet (implementation depends on wallet)
+// Build and execute
+const psbt = await transaction.build();
 const signedPsbt = await wallet.signPsbt(psbt);
+const result = await transaction.send(signedPsbt.toHex());
+```
 
-// Submit the transaction
+#### Advanced Multi-Intention Transaction
+
+```typescript
+// Create a complex transaction with multiple operations
+const transaction = await client.createTransaction({
+  address: "bc1q...",
+  paymentAddress: "bc1q...",
+  involvedPoolAddresses: ["bc1q...pool1", "bc1q...pool2"],
+  involvedRuneIds: ["840000:3", "840000:5"],
+});
+
+// Add multiple intentions in a single transaction
+// Intention 1: Deposit BTC to Pool 1
+transaction.addIntention({
+  poolAddress: "bc1q...pool1",
+  inputCoins: [
+    { id: "0:0", value: BigInt(50000) }, // Deposit 0.0005 BTC
+  ],
+  outputCoins: [],
+  action: "deposit",
+  nonce: BigInt(Date.now()),
+});
+
+// Intention 2: Swap runes between pools
+transaction.addIntention({
+  poolAddress: "bc1q...pool2",
+  inputCoins: [
+    { id: "840000:3", value: BigInt(500) }, // Send 500 of rune A
+  ],
+  outputCoins: [
+    { id: "840000:5", value: BigInt(250) }, // Receive 250 of rune B
+  ],
+  action: "swap",
+  nonce: BigInt(Date.now() + 1),
+});
+
+// Build and execute the multi-intention transaction
+const psbt = await transaction.build();
+const signedPsbt = await wallet.signPsbt(psbt);
 const result = await transaction.send(signedPsbt.toHex());
 ```
 
 ### React Integration
 
 ```tsx
-import { ReeProvider, useRee, useBtcBalance } from "@ree-network/ts-sdk";
+import { ReeProvider, useRee, useBtcBalance } from "@omnity/ree-client-ts-sdk";
 
 function App() {
   return (
@@ -97,8 +149,7 @@ function App() {
 }
 
 function WalletComponent() {
-  const { client, address, updateWallet } = useRee();
-
+  const { client, address, updateWallet, createTransaction } = useRee();
   const { balance: btcBalance } = useBtcBalance();
 
   const connectWallet = () => {
@@ -108,11 +159,40 @@ function WalletComponent() {
     });
   };
 
+  const executeComplexTransaction = async () => {
+    // Create transaction with multiple pools
+    const tx = await createTransaction({
+      involvedPoolAddresses: ["pool1", "pool2"],
+      involvedRuneIds: ["840000:3"],
+    });
+
+    // Add multiple intentions
+    tx.addIntention({
+      poolAddress: "pool1",
+      inputCoins: [{ id: "0:0", value: BigInt(100000) }],
+      outputCoins: [{ id: "840000:3", value: BigInt(1000) }],
+      action: "swap",
+      nonce: BigInt(Date.now()),
+    });
+
+    tx.addIntention({
+      poolAddress: "pool2",
+      inputCoins: [{ id: "840000:3", value: BigInt(500) }],
+      outputCoins: [{ id: "0:0", value: BigInt(50000) }],
+      action: "swap",
+      nonce: BigInt(Date.now() + 1),
+    });
+
+    const psbt = await tx.build();
+    // Sign and send...
+  };
+
   return (
     <div>
       <div>Connected: {address}</div>
       <div>Balance: {btcBalance} BTC</div>
       <button onClick={connectWallet}>Connect wallet</button>
+      <button onClick={executeComplexTransaction}>Execute Complex Transaction</button>
     </div>
   );
 }
@@ -225,12 +305,48 @@ new ReeClient(config: Config)
 
 ### Transaction
 
-Transaction builder for Bitcoin and Rune transactions.
+Transaction builder for Bitcoin and Rune transactions with multi-intention support.
 
 #### Methods
 
-- `build(action: string, nonce: bigint, actionParams?: string): Promise<bitcoin.Psbt>` - Build the PSBT
-- `send(signedPsbtHex: string): Promise<any>` - Submit the signed transaction to orchestrator
+- `addIntention(intention: Intention): void` - Add an intention to the transaction
+- `build(): Promise<bitcoin.Psbt>` - Build the PSBT with all intentions
+- `send(signedPsbtHex: string): Promise<any>` - Submit the signed transaction
+
+#### Intention Structure
+
+```typescript
+interface Intention {
+  poolAddress: string;           // Target pool address
+  inputCoins: CoinBalance[];     // Coins being sent to the pool
+  outputCoins: CoinBalance[];    // Coins expected from the pool
+  action: string;                // Action type (swap, deposit, withdraw, etc.)
+  actionParams?: string;         // Optional action parameters
+  nonce: bigint;                 // Unique nonce for the intention
+}
+
+interface CoinBalance {
+  id: string;                    // Coin ID ("0:0" for BTC, "840000:3" for runes)
+  value: bigint;                 // Amount in smallest unit
+}
+```
+
+### Multi-Intention Transaction Benefits
+
+1. **Atomic Operations**: All intentions succeed or fail together
+2. **Gas Efficiency**: Single transaction fee for multiple operations
+3. **Complex Strategies**: Enable sophisticated trading strategies
+4. **Cross-Pool Operations**: Interact with multiple pools in one transaction
+
+### Transaction Flow
+
+1. **Create Transaction**: Specify involved pools and runes
+2. **Add Intentions**: Define each operation you want to perform
+3. **Build PSBT**: SDK calculates all inputs/outputs and fees
+4. **Sign**: Use your wallet to sign the transaction
+5. **Submit**: Send to the network for execution
+
+All intentions in a transaction are processed atomically - if any intention fails, the entire transaction is reverted.
 
 ### React Hooks
 
@@ -378,21 +494,30 @@ enum Network {
 
 ```typescript
 try {
-  const utxos = await client.getBtcUtxos("bc1q...");
+  const transaction = await client.createTransaction({
+    address: "bc1q...",
+    paymentAddress: "bc1q...",
+    involvedPoolAddresses: ["bc1q..."],
+  });
+  
+  transaction.addIntention({
+    poolAddress: "bc1q...",
+    inputCoins: [{ id: "0:0", value: BigInt(100000) }],
+    outputCoins: [{ id: "840000:3", value: BigInt(1000) }],
+    action: "swap",
+    nonce: BigInt(Date.now()),
+  });
+
+  const psbt = await transaction.build();
+  const signedPsbt = await wallet.signPsbt(psbt);
+  const result = await transaction.send(signedPsbt.toHex());
 } catch (error) {
-  console.error("Failed to fetch UTXOs:", error);
-}
-
-// React hook error handling
-const { client } = useRee();
-
-const loadBalance = async () => {
-  try {
-    const balance = await client.getBtcBalance("bc1q...");
-    setBalance(balance);
-  } catch (error) {
-    console.error("Failed to load balance:", error);
-    setError(error.message);
+  if (error.message.includes("INSUFFICIENT")) {
+    console.error("Insufficient funds:", error);
+  } else if (error.message.includes("Pool")) {
+    console.error("Pool error:", error);
+  } else {
+    console.error("Transaction failed:", error);
   }
-};
+}
 ```
