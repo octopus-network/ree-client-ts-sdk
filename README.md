@@ -192,7 +192,9 @@ function WalletComponent() {
       <div>Connected: {address}</div>
       <div>Balance: {btcBalance} BTC</div>
       <button onClick={connectWallet}>Connect wallet</button>
-      <button onClick={executeComplexTransaction}>Execute Complex Transaction</button>
+      <button onClick={executeComplexTransaction}>
+        Execute Complex Transaction
+      </button>
     </div>
   );
 }
@@ -227,14 +229,18 @@ function MyComponent({ children }) {
     });
 
     const tx = await createTransaction({
-      poolAddress: "bc1q...",
-      sendBtcAmount: depositBtcAmount,
-      sendRuneAmount: BigInt(0),
-      receiveBtcAmount: BigInt(0),
-      receiveRuneAmount: BigInt(0),
+      involvedPoolAddresses: ["bc1q..."],
     });
 
-    const psbt = await tx.build("deposit", depositOffer.nonce);
+    tx.addIntention({
+      poolAddress: "bc1q...",
+      inputCoins: [{ id: "0:0", value: depositBtcAmount }],
+      outputCoins: [],
+      action: "deposit",
+      nonce: depositOffer.nonce,
+    });
+
+    const psbt = await tx.build();
 
     const signedPsbt = await signPsbt(psbt);
     const txid = await tx.send(signedPsbt.toHex());
@@ -317,17 +323,17 @@ Transaction builder for Bitcoin and Rune transactions with multi-intention suppo
 
 ```typescript
 interface Intention {
-  poolAddress: string;           // Target pool address
-  inputCoins: CoinBalance[];     // Coins being sent to the pool
-  outputCoins: CoinBalance[];    // Coins expected from the pool
-  action: string;                // Action type (swap, deposit, withdraw, etc.)
-  actionParams?: string;         // Optional action parameters
-  nonce: bigint;                 // Unique nonce for the intention
+  poolAddress: string; // Target pool address
+  inputCoins: CoinBalance[]; // Coins being sent to the pool
+  outputCoins: CoinBalance[]; // Coins expected from the pool
+  action: string; // Action type (swap, deposit, withdraw, etc.)
+  actionParams?: string; // Optional action parameters
+  nonce: bigint; // Unique nonce for the intention
 }
 
 interface CoinBalance {
-  id: string;                    // Coin ID ("0:0" for BTC, "840000:3" for runes)
-  value: bigint;                 // Amount in smallest unit
+  id: string; // Coin ID ("0:0" for BTC, "840000:3" for runes)
+  value: bigint; // Amount in smallest unit
 }
 ```
 
@@ -424,7 +430,6 @@ function TradingDashboard() {
 #### Hook Usage Examples
 
 ```tsx
-
 // Get rune info with polling
 const { runeInfo } = useRuneInfo("840000:3", { refreshInterval: 30000 });
 
@@ -499,7 +504,7 @@ try {
     paymentAddress: "bc1q...",
     involvedPoolAddresses: ["bc1q..."],
   });
-  
+
   transaction.addIntention({
     poolAddress: "bc1q...",
     inputCoins: [{ id: "0:0", value: BigInt(100000) }],
