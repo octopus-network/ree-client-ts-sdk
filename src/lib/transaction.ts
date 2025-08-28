@@ -3,7 +3,7 @@ import type { AddressType } from "../types/address";
 import type { Utxo } from "../types/utxo";
 import { RuneId, Edict, Runestone, none } from "runelib";
 import * as bitcoin from "bitcoinjs-lib";
-import { toBitcoinNetwork, getAddressType } from "../utils";
+import { toBitcoinNetwork, getAddressType, hexToBytes } from "../utils";
 import { UTXO_DUST, BITCOIN_ID } from "../constants";
 import { type ActorSubclass } from "@dfinity/agent";
 
@@ -51,8 +51,8 @@ export class Transaction {
       hash: utxo.txid,
       index: utxo.vout,
       witnessUtxo: {
-        value: Number(utxo.satoshis),
-        script: Buffer.from(utxo.scriptPk, "hex"),
+        value: BigInt(utxo.satoshis),
+        script: hexToBytes(utxo.scriptPk),
       },
     });
 
@@ -77,7 +77,7 @@ export class Transaction {
   private addOutput(address: string, amount: bigint) {
     this.psbt.addOutput({
       address,
-      value: Number(amount),
+      value: amount,
     });
     this.outputAddressTypes.push(getAddressType(address));
   }
@@ -86,10 +86,10 @@ export class Transaction {
    * Add an OP_RETURN script output (for Runestone)
    * @param script - The script buffer to include
    */
-  private addScriptOutput(script: Buffer) {
+  private addScriptOutput(script: Uint8Array) {
     this.psbt.addOutput({
       script,
-      value: 0,
+      value: BigInt(0),
     });
 
     this.outputAddressTypes.push({ OpReturn: BigInt(script.length) });
@@ -267,7 +267,7 @@ export class Transaction {
     if (changeBtcAmount > UTXO_DUST) {
       this.psbt.addOutput({
         address: paymentAddress,
-        value: Number(changeBtcAmount),
+        value: changeBtcAmount,
       });
     } else if (changeBtcAmount > BigInt(0)) {
       // Small change gets discarded as additional fee
@@ -462,7 +462,7 @@ export class Transaction {
     console.log("edicts", edicts);
 
     const runestone = new Runestone(edicts, none(), none(), none());
-    this.addScriptOutput(runestone.encipher());
+    this.addScriptOutput(new Uint8Array(runestone.encipher()));
 
     targetAddresses.forEach((address) => {
       let btcAmount = UTXO_DUST;
