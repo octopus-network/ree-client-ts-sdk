@@ -603,6 +603,19 @@
   resolved "https://registry.yarnpkg.com/@noble/hashes/-/hashes-1.8.0.tgz#cee43d801fcef9644b11b8194857695acd5f815a"
   integrity sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A==
 
+"@omnity/ree-client-ts-sdk@file:../ree-sdk":
+  version "0.2.1"
+  dependencies:
+    "@bitcoinerlab/secp256k1" "^1.2.0"
+    "@dfinity/agent" "^3.2.0"
+    "@dfinity/candid" "^3.2.0"
+    "@dfinity/principal" "^3.2.2"
+    axios "^1.11.0"
+    decimal.js "^10.6.0"
+    graphql "^16.11.0"
+    graphql-request "^7.2.0"
+    runelib "^1.0.7"
+
 "@rolldown/pluginutils@1.0.0-beta.27":
   version "1.0.0-beta.27"
   resolved "https://registry.yarnpkg.com/@rolldown/pluginutils/-/pluginutils-1.0.0-beta.27.tgz#47d2bf4cef6d470b22f5831b420f8964e0bf755f"

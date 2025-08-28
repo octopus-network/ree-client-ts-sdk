@@ -4,13 +4,13 @@ import dts from "vite-plugin-dts";
 
 export default defineConfig({
   define: {
-    global: 'globalThis',
+    global: "globalThis",
   },
   resolve: {
     alias: {
-      buffer: 'buffer',
-      process: 'process/browser',
-      util: 'util',
+      buffer: "buffer",
+      process: "process/browser",
+      util: "util",
     },
   },
   build: {
@@ -22,7 +22,7 @@ export default defineConfig({
     rollupOptions: {
       external: [
         "react",
-        "react-dom", 
+        "react-dom",
         "react/jsx-runtime",
         "@types/react",
         "@types/react-dom",
@@ -45,7 +45,7 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
-    include: ['buffer', 'process'],
+    include: ["buffer", "process"],
   },
   plugins: [
     dts({
@@ -63,6 +63,10 @@ export default defineConfig({
           .replace(
             /from\s+["'][^"']*\/node_modules\/@types\/react[^"']*["']/g,
             'from "react"'
+          )
+          .replace(
+            /import\s+\*\s+as\s+bitcoin\s+from\s+["']bitcoinjs-lib["']/g,
+            'import * as bitcoin from "bitcoinjs-lib"'
           );
         return { filePath, content: updatedContent };
       },
