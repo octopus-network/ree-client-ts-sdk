@@ -17,7 +17,8 @@ export default defineConfig({
     lib: {
       entry: resolve(__dirname, "src/index.ts"),
       name: "ree-sdk",
-      fileName: "ree-sdk",
+      fileName: (format) => `ree-sdk.${format}.js`,
+      formats: ["es", "cjs"],
     },
     rollupOptions: {
       external: [
@@ -31,17 +32,24 @@ export default defineConfig({
         "@dfinity/candid",
         "axios",
         "graphql",
+        "runelib",
       ],
-      output: {
-        globals: {
-          react: "React",
-          "react-dom": "ReactDOM",
-          "react/jsx-runtime": "React",
-          "bitcoinjs-lib": "bitcoin",
-          axios: "axios",
-          graphql: "GraphQL",
+      output: [
+        {
+          format: "es",
+          exports: "named",
+          globals: {
+            "bitcoinjs-lib": "bitcoin",
+          },
+          interop: "auto",
+          manualChunks: undefined,
         },
-      },
+        {
+          format: "cjs",
+          exports: "named",
+          interop: "auto",
+        },
+      ],
     },
   },
   optimizeDeps: {
@@ -53,22 +61,6 @@ export default defineConfig({
       exclude: ["**/*.test.*", "**/*.spec.*"],
       compilerOptions: {
         skipLibCheck: true,
-      },
-      beforeWriteFile: (filePath, content) => {
-        const updatedContent = content
-          .replace(
-            /import\([^)]*\/node_modules\/@types\/react[^)]*\)/g,
-            'import("react")'
-          )
-          .replace(
-            /from\s+["'][^"']*\/node_modules\/@types\/react[^"']*["']/g,
-            'from "react"'
-          )
-          .replace(
-            /import\s+\*\s+as\s+bitcoin\s+from\s+["']bitcoinjs-lib["']/g,
-            'import * as bitcoin from "bitcoinjs-lib"'
-          );
-        return { filePath, content: updatedContent };
       },
     }),
   ],
