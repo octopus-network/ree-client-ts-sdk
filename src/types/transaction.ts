@@ -1,14 +1,10 @@
 import { type Network } from "./network";
-import type { Utxo } from "./utxo";
 
 export interface TransactionConfig {
   network: Network;
   exchangeId: string;
   address: string;
   paymentAddress: string;
-  btcUtxos: Utxo[];
-  involvedPoolUtxos: Record<string, Utxo[]>;
-  involvedRuneUtxos?: Record<string, Utxo[]>;
 }
 
 export type CoinBalance = {
@@ -27,8 +23,8 @@ export type OutputCoin = {
 };
 
 export type Intention = {
-  inputCoins: CoinBalance[];
-  outputCoins: CoinBalance[];
+  inputCoins: InputCoin[];
+  outputCoins: OutputCoin[];
   action: string;
   actionParams?: string;
   poolAddress: string;

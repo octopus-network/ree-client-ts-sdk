@@ -350,50 +350,10 @@ export class ReeClient {
   async createTransaction({
     address,
     paymentAddress,
-    involvedRuneIds,
-    involvedPoolAddresses,
   }: {
     address: string;
     paymentAddress: string;
-    involvedRuneIds?: string[];
-    involvedPoolAddresses: string[];
   }) {
-    // Fetch required data in parallel
-    const [btcUtxos, runeUtxos, poolInfos] = await Promise.all([
-      this.getBtcUtxos(paymentAddress),
-      involvedRuneIds
-        ? Promise.all(
-            involvedRuneIds.map((runeId) => this.getRuneUtxos(address, runeId))
-          )
-        : Promise.resolve([]),
-      Promise.all(
-        involvedPoolAddresses.map((poolAddress) =>
-          this.getPoolInfo(poolAddress)
-        )
-      ),
-    ]);
-
-    const involvedPoolUtxos: Record<string, Utxo[]> = Object.fromEntries(
-      poolInfos
-        .map(({ utxos, address }) =>
-          utxos.map(({ txid, vout, coins, sats }) => {
-            const scriptPk = getScriptByAddress(address, this.config.network);
-            return {
-              txid,
-              vout,
-              address,
-              runes: coins.map(({ id, value }) => ({
-                id,
-                amount: value.toString(),
-              })),
-              satoshis: sats.toString(),
-              scriptPk: bytesToHex(scriptPk),
-            };
-          })
-        )
-        .map((poolUtxos, index) => [involvedPoolAddresses[index], poolUtxos])
-    );
-
     // Create and return transaction builder
     return new Transaction(
       {
@@ -401,15 +361,12 @@ export class ReeClient {
         exchangeId: this.config.exchangeId,
         address,
         paymentAddress,
-        btcUtxos,
-        involvedRuneUtxos: involvedRuneIds?.length
-          ? Object.fromEntries(
-              involvedRuneIds.map((runeId, index) => [runeId, runeUtxos[index]])
-            )
-          : undefined,
-        involvedPoolUtxos,
       },
-      this.orchestrator
+      this.orchestrator,
+      {
+        btc: this.getBtcUtxos,
+        rune: this.getRuneUtxos,
+      }
     );
   }
 }

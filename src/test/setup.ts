@@ -21,35 +21,42 @@ vi.mock("@bitcoinerlab/secp256k1", () => ({
 }));
 
 // Mock bitcoinjs-lib with working implementation
-vi.mock("bitcoinjs-lib", () => ({
-  initEccLib: vi.fn(() => true),
-  networks: {
-    bitcoin: {
-      messagePrefix: '\x18Bitcoin Signed Message:\n',
-      bech32: 'bc',
-      bip32: { public: 0x0488b21e, private: 0x0488ade4 },
-      pubKeyHash: 0x00,
-      scriptHash: 0x05,
-      wif: 0x80,
+vi.mock("bitcoinjs-lib", () => {
+  const mockPsbtInstance = {
+    data: {
+      addInput: vi.fn().mockReturnThis(),
+      addOutput: vi.fn().mockReturnThis(),
     },
-    testnet: {
-      messagePrefix: '\x18Bitcoin Signed Message:\n',
-      bech32: 'tb',
-      bip32: { public: 0x043587cf, private: 0x04358394 },
-      pubKeyHash: 0x6f,
-      scriptHash: 0xc4,
-      wif: 0xef,
-    },
-  },
-  Psbt: vi.fn().mockImplementation(() => ({
-    addInput: vi.fn().mockReturnThis(),
     addOutput: vi.fn().mockReturnThis(),
     signInput: vi.fn().mockReturnThis(),
     finalizeAllInputs: vi.fn().mockReturnThis(),
-    extractTransaction: vi.fn(() => ({ toHex: () => 'mock-tx-hex' })),
-    toHex: vi.fn(() => 'mock-psbt-hex'),
-  })),
-}));
+    extractTransaction: vi.fn(() => ({ toHex: () => "mock-tx-hex" })),
+    toHex: vi.fn(() => "mock-psbt-hex"),
+  };
+
+  return {
+    initEccLib: vi.fn(() => true),
+    networks: {
+      bitcoin: {
+        messagePrefix: "\x18Bitcoin Signed Message:\n",
+        bech32: "bc",
+        bip32: { public: 0x0488b21e, private: 0x0488ade4 },
+        pubKeyHash: 0x00,
+        scriptHash: 0x05,
+        wif: 0x80,
+      },
+      testnet: {
+        messagePrefix: "\x18Bitcoin Signed Message:\n",
+        bech32: "tb",
+        bip32: { public: 0x043587cf, private: 0x04358394 },
+        pubKeyHash: 0x6f,
+        scriptHash: 0xc4,
+        wif: 0xef,
+      },
+    },
+    Psbt: vi.fn(() => mockPsbtInstance),
+  };
+});
 
 // Mock utils/ecc to prevent initialization issues
 vi.mock("../utils/ecc", () => ({

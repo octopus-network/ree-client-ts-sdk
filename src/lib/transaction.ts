@@ -29,8 +29,17 @@ export class Transaction {
   private additionalDustNeeded = BigInt(0);
 
   private inputUtxos: Utxo[] = [];
+  private getBtcUtxos: (address: string) => Promise<Utxo[]>;
+  private getRuneUtxos: (address: string, runeId: string) => Promise<Utxo[]>;
 
-  constructor(config: TransactionConfig, orchestrator: ActorSubclass) {
+  constructor(
+    config: TransactionConfig,
+    orchestrator: ActorSubclass,
+    utxoFetchers: {
+      btc: (address: string) => Promise<Utxo[]>;
+      rune: (address: string, runeId: string) => Promise<Utxo[]>;
+    }
+  ) {
     this.config = config;
 
     this.psbt = new bitcoin.Psbt({
@@ -38,6 +47,8 @@ export class Transaction {
     });
 
     this.orchestrator = orchestrator;
+    this.getBtcUtxos = utxoFetchers.btc;
+    this.getRuneUtxos = utxoFetchers.rune;
   }
 
   /**
@@ -259,16 +270,14 @@ export class Transaction {
     });
 
     const changeBtcAmount = totalBtcAmount - targetBtcAmount;
+
     if (changeBtcAmount < 0) {
       throw new Error("Insufficient UTXO(s)");
     }
 
     // Add change output if amount is above dust threshold
     if (changeBtcAmount > UTXO_DUST) {
-      this.psbt.addOutput({
-        address: paymentAddress,
-        value: changeBtcAmount,
-      });
+      this.addOutput(paymentAddress, changeBtcAmount);
     } else if (changeBtcAmount > BigInt(0)) {
       // Small change gets discarded as additional fee
       discardedSats = changeBtcAmount;
@@ -277,218 +286,337 @@ export class Transaction {
     this.txFee = discardedSats + currentFee;
   }
 
-  /**
-   * Process all intentions and calculate input/output amounts for the transaction
-   * This method handles multiple intentions in a single transaction, calculating:
-   * - Pool UTXOs to be consumed as inputs
-   * - User rune UTXOs needed for input coins
-   * - Final BTC and rune amounts for all parties (user and pools)
-   * 
-   * @returns Object containing calculated amounts for transaction outputs
-   * @throws Error if pools have insufficient funds for the requested operations
-   */
-  private addInputAndCalculateOutputs() {
+  private async getInvolvedAddressUtxos(): Promise<{
+    btc: Record<string, Utxo[]>;
+    rune: Record<string, Record<string, Utxo[]>>;
+  }> {
+    const btc: Record<string, Utxo[]> = {};
+    const rune: Record<string, Record<string, Utxo[]>> = {};
+
+    const needMap = new Map<
+      string,
+      { needBtc: boolean; runeIds: Set<string> }
+    >();
+
+    // Payment address always needs BTC
+    needMap.set(this.config.paymentAddress, {
+      needBtc: true,
+      runeIds: new Set(),
+    });
+
+    const ensure = (addr: string) => {
+      const key = addr.trim();
+      if (!needMap.has(key)) {
+        needMap.set(key, { needBtc: false, runeIds: new Set() });
+      }
+      return needMap.get(key)!;
+    };
+
+    for (const intention of this.intentions as Intention[]) {
+      for (const ic of intention.inputCoins) {
+        const need = ensure(ic.from);
+        if (ic.coin.id === BITCOIN_ID) {
+          need.needBtc = true;
+        } else {
+          need.runeIds.add(ic.coin.id);
+        }
+      }
+
+      for (const oc of intention.outputCoins) {
+        const need = ensure(oc.to);
+        if (oc.coin.id === BITCOIN_ID) {
+          need.needBtc = true;
+        } else {
+          need.runeIds.add(oc.coin.id);
+        }
+      }
+
+      const poolNeed = ensure(intention.poolAddress);
+      const allCoins = [
+        ...intention.inputCoins.map((c) => c.coin.id),
+        ...intention.outputCoins.map((c) => c.coin.id),
+      ];
+      for (const id of allCoins) {
+        if (id === BITCOIN_ID) {
+          poolNeed.needBtc = true;
+        } else {
+          poolNeed.runeIds.add(id);
+        }
+      }
+    }
+
+    await Promise.all(
+      Array.from(needMap.entries()).map(async ([address, need]) => {
+        if (need.needBtc) {
+          try {
+            btc[address] = await this.getBtcUtxos(address);
+          } catch {
+            btc[address] = [];
+          }
+        }
+        if (need.runeIds.size > 0) {
+          rune[address] = {};
+          await Promise.all(
+            Array.from(need.runeIds).map(async (runeId) => {
+              try {
+                rune[address][runeId] = await this.getRuneUtxos(
+                  address,
+                  runeId
+                );
+              } catch {
+                rune[address][runeId] = [];
+              }
+            })
+          );
+        }
+      })
+    );
+
+    return { btc, rune };
+  }
+
+  private addInputsAndCalculateOutputs(addressUtxos: {
+    btc: Record<string, Utxo[]>;
+    rune: Record<string, Record<string, Utxo[]>>;
+  }) {
     if (!this.intentions.length) {
       throw new Error("No intentions added");
     }
 
-    const poolOutputBtcAmounts: Record<string, bigint> = {};
-    const poolOutputRuneAmounts: Record<string, Record<string, bigint>> = {};
+    const poolAddresses = this.intentions.map((i) => i.poolAddress);
 
-    let userOutputBtcAmount = BigInt(0);
-    const userInputRuneAmounts: Record<string, bigint> = {};
-    const userOutputRuneAmounts: Record<string, bigint> = {};
+    const addressInputCoinAmounts: Record<string, Record<string, bigint>> = {};
+    const addressOutputCoinAmounts: Record<string, Record<string, bigint>> = {};
 
-    const involvedPoolAddresses = new Set<string>();
-    this.intentions.forEach((intention) => {
-      involvedPoolAddresses.add(intention.poolAddress);
-    });
-
-    involvedPoolAddresses.forEach((poolAddress) => {
-      const poolUtxos = this.config.involvedPoolUtxos[poolAddress] ?? [];
-
-      poolUtxos.forEach((utxo) => {
-        poolOutputBtcAmounts[poolAddress] =
-          (poolOutputBtcAmounts[poolAddress] ?? BigInt(0)) +
-          BigInt(utxo.satoshis);
-
-        utxo.runes.forEach((rune) => {
-          poolOutputRuneAmounts[poolAddress] ??= {};
-          poolOutputRuneAmounts[poolAddress][rune.id] =
-            (poolOutputRuneAmounts[poolAddress][rune.id] ?? BigInt(0)) +
-            BigInt(rune.amount);
-        });
-        this.addInput(utxo);
-      });
-    });
-
-    this.intentions.forEach((intention) => {
-      const poolAddress = intention.poolAddress;
-
-      intention.inputCoins.forEach((coin) => {
-        if (coin.id === BITCOIN_ID) {
-          userOutputBtcAmount -= BigInt(coin.value);
-          poolOutputBtcAmounts[poolAddress] += BigInt(coin.value);
-          return;
-        }
-
-        userInputRuneAmounts[coin.id] =
-          (userInputRuneAmounts[coin.id] ?? BigInt(0)) + BigInt(coin.value);
-
-        poolOutputRuneAmounts[poolAddress] ??= {};
-        poolOutputRuneAmounts[poolAddress][coin.id] =
-          (poolOutputRuneAmounts[poolAddress][coin.id] ?? BigInt(0)) +
+    this.intentions.forEach(({ poolAddress, inputCoins, outputCoins }) => {
+      inputCoins.forEach(({ coin, from }) => {
+        addressInputCoinAmounts[from] ??= {};
+        addressInputCoinAmounts[from][coin.id] =
+          (addressInputCoinAmounts[from][coin.id] ?? BigInt(0)) +
           BigInt(coin.value);
       });
 
-      intention.outputCoins.forEach((coin) => {
-        if (coin.id === BITCOIN_ID) {
-          userOutputBtcAmount += BigInt(coin.value);
-          const newBtcBalance =
-            poolOutputBtcAmounts[poolAddress] - BigInt(coin.value);
+      // If no outputCoins specified, send all inputCoins to poolAddress
+      if (outputCoins.length === 0) {
+        inputCoins.forEach(({ coin }) => {
+          addressOutputCoinAmounts[poolAddress] ??= {};
+          addressOutputCoinAmounts[poolAddress][coin.id] =
+            (addressOutputCoinAmounts[poolAddress][coin.id] ?? BigInt(0)) +
+            BigInt(coin.value);
+        });
+      } else {
+        outputCoins.forEach(({ coin, to }) => {
+          addressOutputCoinAmounts[to] ??= {};
+          addressOutputCoinAmounts[to][coin.id] =
+            (addressOutputCoinAmounts[to][coin.id] ?? BigInt(0)) +
+            BigInt(coin.value);
+        });
+      }
+    });
 
-          if (newBtcBalance < BigInt(0)) {
-            throw new Error(
-              `Pool ${poolAddress} insufficient BTC: need ${coin.value}, have ${poolOutputBtcAmounts[poolAddress]}`
-            );
+    // Select UTXOs based on addressSendCoinAmounts and calculate change
+    for (const [address, coinAmounts] of Object.entries(
+      addressInputCoinAmounts
+    )) {
+      for (const [coinId, requiredAmount] of Object.entries(coinAmounts)) {
+        if (coinId === BITCOIN_ID) {
+          if (address === this.config.paymentAddress) {
+            addressOutputCoinAmounts[address] ??= {};
+            addressOutputCoinAmounts[address][coinId] =
+              (addressOutputCoinAmounts[address][coinId] ?? BigInt(0)) -
+              requiredAmount;
+
+            continue;
           }
 
-          poolOutputBtcAmounts[poolAddress] = newBtcBalance;
-          return;
-        }
+          // Select BTC UTXOs
+          const btcUtxos = addressUtxos.btc[address] || [];
+          const selectedUtxos = this.selectBtcUtxos(btcUtxos, requiredAmount);
 
-        userOutputRuneAmounts[coin.id] =
-          (userOutputRuneAmounts[coin.id] ?? BigInt(0)) + BigInt(coin.value);
-
-        poolOutputRuneAmounts[poolAddress] ??= {};
-        const currentRuneBalance =
-          poolOutputRuneAmounts[poolAddress][coin.id] ?? BigInt(0);
-        const newRuneBalance = currentRuneBalance - BigInt(coin.value);
-
-        if (newRuneBalance < BigInt(0)) {
-          throw new Error(
-            `Pool ${poolAddress} insufficient rune ${coin.id}: need ${coin.value}, have ${currentRuneBalance}`
+          // Calculate total input amount
+          const totalInputAmount = selectedUtxos.reduce(
+            (total, utxo) => total + BigInt(utxo.satoshis),
+            BigInt(0)
           );
+
+          // Calculate change
+          const changeAmount = totalInputAmount - requiredAmount;
+          if (changeAmount > BigInt(0)) {
+            addressOutputCoinAmounts[address] ??= {};
+            addressOutputCoinAmounts[address][coinId] =
+              (addressOutputCoinAmounts[address][coinId] ?? BigInt(0)) +
+              changeAmount;
+          }
+
+          // Add as inputs
+          selectedUtxos.forEach((utxo) => this.addInput(utxo));
+        } else {
+          // Select Rune UTXOs
+          const runeUtxos = addressUtxos.rune[address]?.[coinId] || [];
+          const selectedUtxos = this.selectRuneUtxos(
+            runeUtxos,
+            coinId,
+            requiredAmount
+          );
+
+          // Calculate total input rune amount
+          const totalInputRuneAmount = selectedUtxos.reduce((total, utxo) => {
+            const runeBalance = utxo.runes.find((r) => r.id === coinId);
+            return total + BigInt(runeBalance?.amount ?? 0);
+          }, BigInt(0));
+
+          // Calculate rune change
+          const changeAmount = totalInputRuneAmount - requiredAmount;
+          if (changeAmount > BigInt(0)) {
+            addressOutputCoinAmounts[address] ??= {};
+            addressOutputCoinAmounts[address][coinId] =
+              (addressOutputCoinAmounts[address][coinId] ?? BigInt(0)) +
+              changeAmount;
+          }
+
+          // Add as inputs
+          selectedUtxos.forEach((utxo) => this.addInput(utxo));
         }
+      }
+    }
 
-        poolOutputRuneAmounts[poolAddress][coin.id] = newRuneBalance;
-      });
-    });
-
-    const runeIds = Object.keys(userInputRuneAmounts);
-    runeIds.forEach((runeId) => {
-      const requiredAmount = userInputRuneAmounts[runeId];
-      if (requiredAmount <= BigInt(0)) return;
-
-      const runeUtxos = this.selectRuneUtxos(
-        this.config.involvedRuneUtxos?.[runeId] ?? [],
-        runeId,
-        requiredAmount
-      );
-
-      const totalRuneAmount = runeUtxos.reduce(
-        (total, curr) =>
-          total + BigInt(curr.runes.find((r) => r.id === runeId)?.amount ?? 0),
-        BigInt(0)
-      );
-
-      const changeRuneAmount = totalRuneAmount - requiredAmount;
-      if (changeRuneAmount > BigInt(0)) {
-        userOutputRuneAmounts[runeId] =
-          (userOutputRuneAmounts[runeId] ?? BigInt(0)) + changeRuneAmount;
+    // We should add all pool utxos
+    for (const [address, coinAmounts] of Object.entries(
+      addressOutputCoinAmounts
+    )) {
+      // Skip if this address already processed as input
+      if (
+        addressInputCoinAmounts[address] ||
+        !poolAddresses.includes(address)
+      ) {
+        continue;
       }
 
-      runeUtxos.forEach((utxo) => {
-        this.addInput(utxo);
-      });
-    });
+      for (const [coinId] of Object.entries(coinAmounts)) {
+        if (coinId === BITCOIN_ID) {
+          const btcUtxos = addressUtxos.btc[address] || [];
 
-    return {
-      userOutputBtcAmount,
-      userOutputRuneAmounts,
-      poolOutputBtcAmounts,
-      poolOutputRuneAmounts,
-    };
+          // Calculate total input amount
+          const totalInputAmount = btcUtxos.reduce(
+            (total, utxo) => total + BigInt(utxo.satoshis),
+            BigInt(0)
+          );
+
+          addressOutputCoinAmounts[address] ??= {};
+          addressOutputCoinAmounts[address][coinId] =
+            (addressOutputCoinAmounts[address][coinId] ?? BigInt(0)) +
+            totalInputAmount;
+
+          // Add as inputs
+          btcUtxos.forEach((utxo) => this.addInput(utxo));
+        } else {
+          const runeUtxos = addressUtxos.rune[address]?.[coinId] || [];
+
+          // Calculate total input rune amount
+          const totalInputRuneAmount = runeUtxos.reduce((total, utxo) => {
+            const runeBalance = utxo.runes.find((r) => r.id === coinId);
+            return total + BigInt(runeBalance?.amount ?? 0);
+          }, BigInt(0));
+
+          addressOutputCoinAmounts[address] ??= {};
+          addressOutputCoinAmounts[address][coinId] =
+            (addressOutputCoinAmounts[address][coinId] ?? BigInt(0)) +
+            totalInputRuneAmount;
+
+          // Add as inputs
+          runeUtxos.forEach((utxo) => this.addInput(utxo));
+        }
+      }
+    }
+
+    return addressOutputCoinAmounts;
   }
 
-  private addRuneOutputs(
-    userOutputRuneAmounts: Record<string, bigint>,
-    poolOutputRuneAmounts: Record<string, Record<string, bigint>>,
-    poolOutputBtcAmounts: Record<string, bigint>
+  private addOutputs(
+    addressReceiveCoinAmounts: Record<string, Record<string, bigint>>
   ) {
+    // Collect all rune IDs that need to be transferred
     const runeIdSet = new Set<string>();
-
-    const poolAddressses = Object.keys(poolOutputBtcAmounts);
-
-    for (const id in userOutputRuneAmounts) {
-      runeIdSet.add(id);
-    }
-    poolAddressses.forEach((poolAddress) => {
-      for (const id in poolOutputRuneAmounts[poolAddress]) {
-        runeIdSet.add(id);
+    for (const [, coinAmounts] of Object.entries(addressReceiveCoinAmounts)) {
+      for (const coinId of Object.keys(coinAmounts)) {
+        if (coinId !== BITCOIN_ID) {
+          runeIdSet.add(coinId);
+        }
       }
-    });
+    }
 
     const runeIds = Array.from(runeIdSet);
 
-    const edicts: Edict[] = [];
-    const targetAddresses: string[] = [];
+    // If there are runes to transfer, create runestone and OP_RETURN output
+    if (runeIds.length > 0) {
+      const edicts: Edict[] = [];
+      const targetAddresses: string[] = [];
 
-    let outputIndex = 1;
-    runeIds.forEach((runeIdStr: string) => {
-      const runeId = new RuneId(
-        Number(runeIdStr.split(":")[0]),
-        Number(runeIdStr.split(":")[1])
-      );
+      let outputIndex = 1; // Start from 1 since OP_RETURN is at index 0
 
-      const toUserRuneAmount = userOutputRuneAmounts[runeIdStr] ?? BigInt(0);
-      if (toUserRuneAmount > BigInt(0)) {
-        edicts.push(new Edict(runeId, toUserRuneAmount, outputIndex));
-        targetAddresses.push(this.config.address);
-        outputIndex++;
-      }
+      // Create edicts for each rune transfer
+      runeIds.forEach((runeIdStr: string) => {
+        const runeId = new RuneId(
+          Number(runeIdStr.split(":")[0]),
+          Number(runeIdStr.split(":")[1])
+        );
 
-      poolAddressses.forEach((poolAddress) => {
-        const amount =
-          poolOutputRuneAmounts[poolAddress][runeIdStr] ?? BigInt(0);
-        if (amount > BigInt(0)) {
-          edicts.push(new Edict(runeId, amount, outputIndex));
-          targetAddresses.push(poolAddress);
-          outputIndex++;
+        for (const [address, coinAmounts] of Object.entries(
+          addressReceiveCoinAmounts
+        )) {
+          const runeAmount = coinAmounts[runeIdStr] ?? BigInt(0);
+          if (runeAmount > BigInt(0)) {
+            edicts.push(new Edict(runeId, runeAmount, outputIndex));
+            targetAddresses.push(address);
+            outputIndex++;
+          }
         }
       });
-    });
 
-    console.log("edicts", edicts);
+      // Add OP_RETURN output with runestone
+      const runestone = new Runestone(edicts, none(), none(), none());
+      this.addScriptOutput(new Uint8Array(runestone.encipher()));
 
-    const runestone = new Runestone(edicts, none(), none(), none());
-    this.addScriptOutput(new Uint8Array(runestone.encipher()));
+      // Add outputs for addresses that receive runes
+      targetAddresses.forEach((address) => {
+        const btcAmount =
+          addressReceiveCoinAmounts[address]?.[BITCOIN_ID] ?? BigInt(0);
+        const outputAmount = btcAmount > BigInt(0) ? btcAmount : UTXO_DUST;
 
-    targetAddresses.forEach((address) => {
-      let btcAmount = UTXO_DUST;
-      if (!poolOutputBtcAmounts[address] || address === this.config.address) {
-        this.additionalDustNeeded += UTXO_DUST;
-      } else {
-        btcAmount = poolOutputBtcAmounts[address];
-        delete poolOutputBtcAmounts[address];
+        this.addOutput(address, outputAmount);
+
+        // If we used the BTC amount, remove it from remaining amounts
+        if (btcAmount > BigInt(0)) {
+          delete addressReceiveCoinAmounts[address][BITCOIN_ID];
+        } else {
+          // Track additional dust needed for fee calculation
+          this.additionalDustNeeded += UTXO_DUST;
+        }
+      });
+    }
+
+    // Add remaining BTC-only outputs
+    for (const [address, coinAmounts] of Object.entries(
+      addressReceiveCoinAmounts
+    )) {
+      const btcAmount = coinAmounts[BITCOIN_ID] ?? BigInt(0);
+      if (btcAmount > BigInt(0)) {
+        this.addOutput(address, btcAmount);
       }
-      this.addOutput(address, btcAmount);
-    });
-
-    return poolOutputBtcAmounts;
+    }
   }
 
   /**
    * Add an intention to the transaction
    * Multiple intentions can be added to create complex, atomic transactions
-   * 
+   *
    * @param intention - The intention object containing:
    *   - poolAddress: Target pool address
    *   - inputCoins: Coins being sent to the pool
-   *   - outputCoins: Coins expected from the pool  
+   *   - outputCoins: Coins expected from the pool
    *   - action: Action type (swap, deposit, withdraw, etc.)
    *   - nonce: Unique identifier for this intention
-   * 
+   *
    * @example
    * ```typescript
    * // Add a swap intention
@@ -512,10 +640,10 @@ export class Transaction {
    * - Output distributions to user and pools
    * - Transaction fees and change outputs
    * - Runestone for rune transfers
-   * 
+   *
    * @returns Promise resolving to the built PSBT ready for signing
    * @throws Error if insufficient funds or invalid intentions
-   * 
+   *
    * @example
    * ```typescript
    * // After adding intentions
@@ -524,32 +652,21 @@ export class Transaction {
    * ```
    */
   async build(): Promise<bitcoin.Psbt> {
-    const {
-      userOutputBtcAmount,
-      userOutputRuneAmounts,
-      poolOutputBtcAmounts,
-      poolOutputRuneAmounts,
-    } = this.addInputAndCalculateOutputs();
+    const addressUtxos = await this.getInvolvedAddressUtxos();
 
-    console.log(
-      userOutputBtcAmount,
-      userOutputRuneAmounts,
-      poolOutputBtcAmounts,
-      poolOutputRuneAmounts
-    );
+    // Get output coin amounts of addresses
+    const addressOutputCoinAmounts =
+      this.addInputsAndCalculateOutputs(addressUtxos);
 
-    const remainPoolOutputBtcAmounts = this.addRuneOutputs(
-      userOutputRuneAmounts,
-      poolOutputRuneAmounts,
-      poolOutputBtcAmounts
-    );
+    // Add outputs by the output coin amounts
+    this.addOutputs(addressOutputCoinAmounts);
 
-    const targetBtcAddresses = Object.keys(remainPoolOutputBtcAmounts);
-    targetBtcAddresses.forEach((address) => {
-      this.addOutput(address, remainPoolOutputBtcAmounts[address]);
-    });
+    const paymentAddress = this.config.paymentAddress;
+    const userBtcUtxos = addressUtxos.btc[paymentAddress] ?? [];
+    const userOutputBtcAmount =
+      addressOutputCoinAmounts[paymentAddress]?.[BITCOIN_ID] ?? BigInt(0);
 
-    await this.addBtcAndFees(this.config.btcUtxos, -userOutputBtcAmount);
+    await this.addBtcAndFees(userBtcUtxos, -userOutputBtcAmount);
 
     return this.psbt;
   }
@@ -589,20 +706,8 @@ export class Transaction {
                 nonce,
               }) => ({
                 exchange_id: this.config.exchangeId,
-                input_coins: inputCoins.map((coin) => ({
-                  coin,
-                  from:
-                    coin.id === BITCOIN_ID
-                      ? this.config.paymentAddress
-                      : this.config.address,
-                })),
-                output_coins: outputCoins.map((coin) => ({
-                  coin,
-                  to:
-                    coin.id === BITCOIN_ID
-                      ? this.config.paymentAddress
-                      : this.config.address,
-                })),
+                input_coins: inputCoins,
+                output_coins: outputCoins,
                 pool_address: poolAddress,
                 action,
                 action_params: actionParams ?? "",
