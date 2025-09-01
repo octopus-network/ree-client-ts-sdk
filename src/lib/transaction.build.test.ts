@@ -29,6 +29,8 @@ describe("Transaction.build", () => {
   const paymentAddress = "tb1qpaymentxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"; // BTC payment address
   const poolAddress = "tb1qpoolxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
 
+  const richPoolAddress = "tb1qrichpoolxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+
   let orchestrator: any;
   let utxoFetchers: any;
 
@@ -49,24 +51,79 @@ describe("Transaction.build", () => {
               satoshis: "120000",
               scriptPk: "001234",
               address: paymentAddress,
+              runes: [],
             }),
           ];
         }
         if (addr === poolAddress) {
           return [
             {
-              txid: "u1",
+              txid: "u3",
               vout: 0,
               satoshis: "50000",
               scriptPk: "001234",
               address: poolAddress,
+              runes: [{ id: "810000:1", amount: "50000" }],
+            },
+          ];
+        }
+
+        if (addr === richPoolAddress) {
+          return [
+            {
+              txid: "u1",
+              vout: 0,
+              satoshis: "30000",
+              scriptPk: "001234",
+              address: richPoolAddress,
+              runes: [{ id: "840000:3", amount: "10000" }],
+            },
+            {
+              txid: "u2",
+              vout: 0,
+              satoshis: "10000",
+              scriptPk: "001234",
+              address: richPoolAddress,
+              runes: [{ id: "840000:3", amount: "5000" }],
             },
           ];
         }
         return [];
       }),
-      rune: vi.fn(async (_addr: string, _runeId: string) => {
-        // For BTC-only test, no rune utxos are needed
+      rune: vi.fn(async (addr: string, _runeId: string) => {
+        if (addr === poolAddress) {
+          return [
+            {
+              txid: "u3",
+              vout: 0,
+              satoshis: "50000",
+              scriptPk: "001234",
+              address: poolAddress,
+              runes: [{ id: "810000:1", amount: "50000" }],
+            },
+          ];
+        }
+
+        if (addr === richPoolAddress) {
+          return [
+            {
+              txid: "u1",
+              vout: 0,
+              satoshis: "30000",
+              scriptPk: "001234",
+              address: richPoolAddress,
+              runes: [{ id: "840000:3", amount: "10000" }],
+            },
+            {
+              txid: "u2",
+              vout: 0,
+              satoshis: "10000",
+              scriptPk: "001234",
+              address: richPoolAddress,
+              runes: [{ id: "840000:3", amount: "5000" }],
+            },
+          ];
+        }
         return [];
       }),
     };
@@ -81,7 +138,7 @@ describe("Transaction.build", () => {
     };
   }
 
-  it("builds a PSBT for a simple BTC intention and adds inputs/outputs", async () => {
+  it("deposit btc to pool", async () => {
     const tx = new Transaction(makeConfig(), orchestrator, utxoFetchers);
 
     const depositAmount = BigInt(10_000);
@@ -120,6 +177,50 @@ describe("Transaction.build", () => {
     expect(addOutputSpy).toHaveBeenCalledWith(paymentAddress, BigInt(109000));
   });
 
+  it("withdraw btc from pool", async () => {
+    const tx = new Transaction(makeConfig(), orchestrator, utxoFetchers);
+
+    const withdrawAmount = BigInt(10_000);
+    const intention: Intention = {
+      poolAddress,
+      inputCoins: [
+        {
+          coin: { id: BITCOIN_ID, value: withdrawAmount },
+          from: poolAddress,
+        },
+      ],
+      outputCoins: [
+        {
+          coin: { id: BITCOIN_ID, value: withdrawAmount },
+          to: paymentAddress,
+        },
+      ],
+      action: "withdraw",
+      nonce: BigInt(234),
+    };
+
+    tx.addIntention(intention);
+
+    const addOutputSpy = vi.spyOn(tx as any, "addOutput");
+
+    await tx.build();
+
+    const poolBtcAmount = BigInt(50_000);
+
+    expect(addOutputSpy).toHaveBeenCalledWith(
+      poolAddress,
+      poolBtcAmount - withdrawAmount
+    );
+
+    // Should add change output 10000 - 1000(tx fee) = 9000
+    expect(addOutputSpy).toHaveBeenCalledWith(paymentAddress, BigInt(9000));
+
+    expect(addOutputSpy).toHaveBeenCalledWith(
+      poolAddress,
+      poolBtcAmount - withdrawAmount
+    );
+  });
+
   it("throws when BTC UTXOs are insufficient to cover amount+fee", async () => {
     // Provide too-small UTXO set
     utxoFetchers.btc = vi.fn(async (addr: string) => {
@@ -151,16 +252,33 @@ describe("Transaction.build", () => {
     await expect(tx.build()).rejects.toThrow();
   });
 
-  it("adds runestone output when rune transfers are present", async () => {
+  it("swap some btc to rune", async () => {
     const tx = new Transaction(makeConfig(), orchestrator, utxoFetchers);
 
+    const inputBtcAmount = BigInt(100);
+    const outRuneAmount = BigInt(12_000);
+    const richPoolRuneAmount = BigInt(15_000);
+
     tx.addIntention({
-      poolAddress,
-      inputCoins: [],
+      poolAddress: richPoolAddress,
+      inputCoins: [
+        {
+          coin: { id: "0:0", value: inputBtcAmount },
+          from: paymentAddress,
+        },
+        {
+          coin: { id: "840000:3", value: outRuneAmount },
+          from: richPoolAddress,
+        },
+      ],
       outputCoins: [
         {
-          coin: { id: "840000:3", value: BigInt(100) },
+          coin: { id: "840000:3", value: outRuneAmount },
           to: userAddress,
+        },
+        {
+          coin: { id: "0:0", value: inputBtcAmount },
+          to: richPoolAddress,
         },
       ],
       action: "swap",
@@ -173,7 +291,62 @@ describe("Transaction.build", () => {
 
     const runeId = new RuneId(840000, 3);
 
-    const edicts: Edict[] = [new Edict(runeId, BigInt(100), 1)];
+    const edicts: Edict[] = [
+      new Edict(runeId, outRuneAmount, 1),
+      new Edict(runeId, richPoolRuneAmount - outRuneAmount, 2),
+    ];
+    const runestone = new Runestone(edicts, none(), none(), none());
+    expect(addScriptOutputSpy).toHaveBeenCalledWith(
+      new Uint8Array(runestone.encipher())
+    );
+  });
+
+  it("extract_protocol_fee and donate to rich pool", async () => {
+    const tx = new Transaction(makeConfig(), orchestrator, utxoFetchers);
+
+    const protocolFee = BigInt(100);
+
+    tx.addIntention({
+      poolAddress,
+      inputCoins: [],
+      outputCoins: [
+        {
+          coin: { id: "0:0", value: protocolFee },
+          to: richPoolAddress,
+        },
+      ],
+      action: "extract_protocol_fee",
+      nonce: BigInt(1),
+    });
+
+    tx.addIntention({
+      poolAddress: richPoolAddress,
+      inputCoins: [
+        {
+          coin: { id: "0:0", value: protocolFee },
+          from: poolAddress,
+        },
+      ],
+      outputCoins: [],
+      action: "donate",
+      nonce: BigInt(2),
+    });
+
+    const addOutputSpy = vi.spyOn(tx as any, "addOutput");
+    const addScriptOutputSpy = vi.spyOn(tx as any, "addScriptOutput");
+    await tx.build();
+
+    const richPoolBtcAmount = BigInt(40000);
+    const richPoolRuneAmount = BigInt(15_000);
+
+    expect(addOutputSpy).toHaveBeenCalledWith(
+      richPoolAddress,
+      richPoolBtcAmount + protocolFee
+    );
+
+    const runeId = new RuneId(840000, 3);
+
+    const edicts: Edict[] = [new Edict(runeId, richPoolRuneAmount, 1)];
     const runestone = new Runestone(edicts, none(), none(), none());
     expect(addScriptOutputSpy).toHaveBeenCalledWith(
       new Uint8Array(runestone.encipher())

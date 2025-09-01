@@ -56,6 +56,15 @@ export class Transaction {
    * @param utxo - The UTXO to add as input
    */
   private addInput(utxo: Utxo) {
+    // Ignore if already added
+    if (
+      this.inputUtxos.findIndex(
+        (i) => i.txid === utxo.txid && i.vout === utxo.vout
+      ) >= 0
+    ) {
+      return;
+    }
+
     const { address } = utxo;
 
     this.psbt.data.addInput({
@@ -164,7 +173,11 @@ export class Transaction {
    * @param btcAmount - Required BTC amount in satoshis
    * @returns Selected UTXOs that contain enough BTC
    */
-  private selectBtcUtxos(btcUtxos: Utxo[], btcAmount: bigint) {
+  private selectBtcUtxos(
+    btcUtxos: Utxo[],
+    btcAmount: bigint,
+    isPoolAddress = false
+  ) {
     const selectedUtxos: Utxo[] = [];
 
     if (btcAmount <= BigInt(0)) {
@@ -173,7 +186,7 @@ export class Transaction {
 
     let totalAmount = BigInt(0);
     for (const utxo of btcUtxos) {
-      if (utxo.runes.length) {
+      if (utxo.runes.length && !isPoolAddress) {
         continue;
       }
       totalAmount += BigInt(utxo.satoshis);
@@ -388,7 +401,7 @@ export class Transaction {
     const addressInputCoinAmounts: Record<string, Record<string, bigint>> = {};
     const addressOutputCoinAmounts: Record<string, Record<string, bigint>> = {};
 
-    this.intentions.forEach(({ poolAddress, inputCoins, outputCoins }) => {
+    this.intentions.forEach(({ inputCoins, outputCoins }) => {
       inputCoins.forEach(({ coin, from }) => {
         addressInputCoinAmounts[from] ??= {};
         addressInputCoinAmounts[from][coin.id] =
@@ -396,22 +409,12 @@ export class Transaction {
           BigInt(coin.value);
       });
 
-      // If no outputCoins specified, send all inputCoins to poolAddress
-      if (outputCoins.length === 0) {
-        inputCoins.forEach(({ coin }) => {
-          addressOutputCoinAmounts[poolAddress] ??= {};
-          addressOutputCoinAmounts[poolAddress][coin.id] =
-            (addressOutputCoinAmounts[poolAddress][coin.id] ?? BigInt(0)) +
-            BigInt(coin.value);
-        });
-      } else {
-        outputCoins.forEach(({ coin, to }) => {
-          addressOutputCoinAmounts[to] ??= {};
-          addressOutputCoinAmounts[to][coin.id] =
-            (addressOutputCoinAmounts[to][coin.id] ?? BigInt(0)) +
-            BigInt(coin.value);
-        });
-      }
+      outputCoins.forEach(({ coin, to }) => {
+        addressOutputCoinAmounts[to] ??= {};
+        addressOutputCoinAmounts[to][coin.id] =
+          (addressOutputCoinAmounts[to][coin.id] ?? BigInt(0)) +
+          BigInt(coin.value);
+      });
     });
 
     // Select UTXOs based on addressSendCoinAmounts and calculate change
@@ -431,7 +434,11 @@ export class Transaction {
 
           // Select BTC UTXOs
           const btcUtxos = addressUtxos.btc[address] || [];
-          const selectedUtxos = this.selectBtcUtxos(btcUtxos, requiredAmount);
+          const selectedUtxos = this.selectBtcUtxos(
+            btcUtxos,
+            requiredAmount,
+            poolAddresses.includes(address)
+          );
 
           // Calculate total input amount
           const totalInputAmount = selectedUtxos.reduce(
@@ -452,6 +459,7 @@ export class Transaction {
           selectedUtxos.forEach((utxo) => this.addInput(utxo));
         } else {
           // Select Rune UTXOs
+
           const runeUtxos = addressUtxos.rune[address]?.[coinId] || [];
           const selectedUtxos = this.selectRuneUtxos(
             runeUtxos,
@@ -467,6 +475,7 @@ export class Transaction {
 
           // Calculate rune change
           const changeAmount = totalInputRuneAmount - requiredAmount;
+
           if (changeAmount > BigInt(0)) {
             addressOutputCoinAmounts[address] ??= {};
             addressOutputCoinAmounts[address][coinId] =
@@ -508,7 +517,15 @@ export class Transaction {
             totalInputAmount;
 
           // Add as inputs
-          btcUtxos.forEach((utxo) => this.addInput(utxo));
+          btcUtxos.forEach((utxo) => {
+            this.addInput(utxo);
+            utxo.runes.forEach((rune) => {
+              addressOutputCoinAmounts[address] ??= {};
+              addressOutputCoinAmounts[address][rune.id] =
+                (addressOutputCoinAmounts[address][rune.id] ?? BigInt(0)) +
+                BigInt(rune.amount);
+            });
+          });
         } else {
           const runeUtxos = addressUtxos.rune[address]?.[coinId] || [];
 
