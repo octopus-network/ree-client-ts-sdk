@@ -773,6 +773,18 @@ export class Transaction {
   async build(): Promise<bitcoin.Psbt> {
     const addressUtxos = await this.getInvolvedAddressUtxos();
 
+    // Reset pool UTXOs if provided
+    for (const it of this.intentions) {
+      const pu = (it as any).poolUtxos as Utxo[] | undefined;
+      if (!pu?.length) continue;
+      addressUtxos.btc[it.poolAddress] = pu;
+      addressUtxos.rune[it.poolAddress] = {};
+      const runeMap = addressUtxos.rune[it.poolAddress];
+      for (const utxo of pu) {
+        for (const r of utxo.runes) (runeMap[r.id] ??= []).push(utxo);
+      }
+    }
+
     // Get output coin amounts of addresses
     const addressOutputCoinAmounts =
       this.addInputsAndCalculateOutputs(addressUtxos);

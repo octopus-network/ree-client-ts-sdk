@@ -1,4 +1,5 @@
 import { type Network } from "./network";
+import type { Utxo } from "./utxo";
 
 export interface TransactionConfig {
   network: Network;
@@ -28,5 +29,6 @@ export type Intention = {
   action: string;
   actionParams?: string;
   poolAddress: string;
+  poolUtxos?: Utxo[];
   nonce: bigint;
 };

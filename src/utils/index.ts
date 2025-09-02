@@ -3,3 +3,4 @@ import "./ecc";
 
 export * from "./common";
 export * from "./address";
+export * from "./utxo";

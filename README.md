@@ -75,20 +75,21 @@ const transaction = await client.createTransaction({
 // Add a single intention (e.g., swap BTC for runes)
 transaction.addIntention({
   poolAddress: "bc1p...",
+  poolUtxos: [],
   inputCoins: [
     {
-      coin: { 
-        id: "0:0", 
-        value: BigInt(100000) 
+      coin: {
+        id: "0:0",
+        value: BigInt(100000),
       }, // Send 0.001 BTC,
       from: paymentAddress,
     },
   ],
   outputCoins: [
     {
-      coin: { 
-        id: "840000:3", 
-        value: BigInt(1000) 
+      coin: {
+        id: "840000:3",
+        value: BigInt(1000),
       }, // Receive 1000 runes,
       to: address,
     },
@@ -119,9 +120,9 @@ transaction.addIntention({
   inputCoins: [
     {
       // Deposit 0.0005 BTC
-      coin: { 
-        id: "0:0", 
-        value: BigInt(50000) 
+      coin: {
+        id: "0:0",
+        value: BigInt(50000),
       },
       from: paymentAddress,
     },
@@ -137,9 +138,9 @@ transaction.addIntention({
   inputCoins: [
     {
       // Send 500 of rune A,
-      coin: { 
-        id: "840000:3", 
-        value: BigInt(500) 
+      coin: {
+        id: "840000:3",
+        value: BigInt(500),
       },
       from: address,
     },
@@ -147,9 +148,9 @@ transaction.addIntention({
   outputCoins: [
     {
       // Receive 250 of rune B,
-      coin: { 
-        id: "840000:5", 
-        value: BigInt(250) 
+      coin: {
+        id: "840000:5",
+        value: BigInt(250),
       },
       to: address,
     },
@@ -196,15 +197,15 @@ function WalletComponent() {
     tx.addIntention({
       poolAddress: "pool1",
       inputCoins: [{
-        coin: { 
-          id: "0:0", 
-          value: BigInt(100000) 
+        coin: {
+          id: "0:0",
+          value: BigInt(100000)
         },
         from: paymentAddress
       }],
       outputCoins: [
-        coint: { 
-          id: "840000:3", 
+        coint: {
+          id: "840000:3",
           value: BigInt(1000)
         },
         to: address
@@ -216,16 +217,16 @@ function WalletComponent() {
     tx.addIntention({
       poolAddress: "pool2",
       inputCoins: [{
-        coin: { 
-          id: "840000:3", 
-          value: BigInt(500) 
+        coin: {
+          id: "840000:3",
+          value: BigInt(500)
         },
         from: address
       }],
       outputCoins: [{
-        coin: { 
-          id: "0:0", 
-          value: BigInt(50000) 
+        coin: {
+          id: "0:0",
+          value: BigInt(50000)
         },
         to: paymentAddress
       }],
@@ -282,13 +283,15 @@ function MyComponent({ children }) {
 
     tx.addIntention({
       poolAddress: "bc1q...",
-      inputCoins: [{
-        coin: { 
-          id: "0:0", 
-          value: depositBtcAmount 
+      inputCoins: [
+        {
+          coin: {
+            id: "0:0",
+            value: depositBtcAmount,
+          },
+          from: paymentAddress,
         },
-        from: paymentAddress
-      }],
+      ],
       outputCoins: [],
       action: "deposit",
       nonce: depositOffer.nonce,
@@ -377,20 +380,29 @@ Transaction builder for Bitcoin and Rune transactions with multi-intention suppo
 
 ```typescript
 interface Intention {
-  poolAddress: string; // Target pool address
-  inputCoins: InputCoin[]; // Coins being sent to the pool
-  outputCoins: InputCoin[]; // Coins expected from the pool
-  action: string; // Action type (swap, deposit, withdraw, etc.)
-  actionParams?: string; // Optional action parameters
-  nonce: bigint; // Unique nonce for the intention
+  // Target pool address
+  poolAddress: string;
+  // the UTXOs obtained through the pool’s pre methods
+  // if not provided, will be fetched via the maestro API.
+  poolUtxos?: [];
+  // Coins being sent to the pool
+  inputCoins: InputCoin[];
+  // Coins expected from the pool
+  outputCoins: InputCoin[];
+  // Action type (swap, deposit, withdraw, etc.)
+  action: string;
+  // Optional action parameters
+  actionParams?: string;
+  // Unique nonce for the intention
+  nonce: bigint;
 }
 
 type CoinBalance = {
   id: string; // Coin ID ("0:0" for BTC, "840000:3" for runes)
   value: bigint; // Amount in smallest unit
-}
+};
 
- type InputCoin = {
+type InputCoin = {
   coin: CoinBalance;
   from: string;
 };
@@ -399,7 +411,6 @@ type OutputCoin = {
   coin: CoinBalance;
   to: string;
 };
-
 ```
 
 ### Multi-Intention Transaction Benefits
@@ -559,4 +570,3 @@ enum Network {
   Testnet = "testnet",
 }
 ```
-
