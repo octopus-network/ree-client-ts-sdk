@@ -21,10 +21,7 @@ interface ReeContextValue {
   paymentAddress: string;
   updateWallet: (wallet: { address?: string; paymentAddress?: string }) => void;
 
-  createTransaction: (params: {
-    involvedRuneIds?: string[];
-    involvedPoolAddresses: string[];
-  }) => Promise<Transaction>;
+  createTransaction: () => Promise<Transaction>;
 }
 
 const ReeContext = createContext<ReeContextValue | null>(null);
@@ -70,23 +67,16 @@ export function ReeProvider({ children, config }: ReeProviderProps) {
     return new ReeClient(config);
   }, [config]);
 
-  const createTransaction = useCallback(
-    async (params: {
-      involvedRuneIds?: string[];
-      involvedPoolAddresses: string[];
-    }) => {
-      if (!client) throw new Error("Client not available");
-      if (!wallet.address || !wallet.paymentAddress) {
-        throw new Error("Wallet not connected");
-      }
-      return client.createTransaction({
-        ...params,
-        address: wallet.address,
-        paymentAddress: wallet.paymentAddress,
-      });
-    },
-    [client, wallet]
-  );
+  const createTransaction = useCallback(async () => {
+    if (!client) throw new Error("Client not available");
+    if (!wallet.address || !wallet.paymentAddress) {
+      throw new Error("Wallet not connected");
+    }
+    return client.createTransaction({
+      address: wallet.address,
+      paymentAddress: wallet.paymentAddress,
+    });
+  }, [client, wallet]);
 
   const contextValue = useMemo(
     () => ({

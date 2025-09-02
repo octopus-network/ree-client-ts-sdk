@@ -1,268 +1,411 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import "../test/setup";
 import { Transaction } from "./transaction";
 import { Network } from "../types/network";
-import type { TransactionConfig } from "../types/transaction";
+import type { TransactionConfig, Intention } from "../types/transaction";
 import type { Utxo } from "../types/utxo";
+import { BITCOIN_ID, UTXO_DUST } from "../constants";
+import { RuneId, Edict, Runestone, none } from "runelib";
 
-// Mock dependencies
-// vi.mock("bitcoinjs-lib");
-vi.mock("runelib");
+// Helper to make a dummy hex string of given byte length
+function hexOf(len: number) {
+  return Array.from({ length: len }, () => "00").join("");
+}
 
-const mockConfig: TransactionConfig = {
-  network: Network.Testnet,
-  address: "tb1quser123",
-  paymentAddress: "tb1qpayment123",
-  exchangeId: "test-exchange",
-};
+function makeUtxo(params: Partial<Utxo> = {}): Utxo {
+  return {
+    txid: params.txid ?? "txid-1",
+    vout: params.vout ?? 0,
+    satoshis: params.satoshis ?? "100000",
+    height: params.height,
+    runes: params.runes ?? [],
+    address: params.address ?? "tb1quserpaymentxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    scriptPk: params.scriptPk ?? hexOf(34),
+  };
+}
 
-const mockOrchestrator = {
-  estimate_min_tx_fee: vi.fn(),
-} as any;
+describe("Transaction.build", () => {
+  const userAddress = "tb1quserordxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"; // ordinals/rune address
+  const paymentAddress = "tb1qpaymentxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"; // BTC payment address
+  const poolAddress = "tb1qpoolxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
 
-const mockUtxoFetchers = {
-  btc: vi.fn(),
-  rune: vi.fn(),
-};
+  const richPoolAddress = "tb1qrichpoolxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
 
-describe("Transaction.addBtcAndFees", () => {
-  let transaction: Transaction;
+  let client: any;
 
   beforeEach(() => {
-    vi.clearAllMocks();
-    transaction = new Transaction(
-      mockConfig,
-      mockOrchestrator,
-      mockUtxoFetchers
+    client = {
+      orchestrator: {
+        estimate_min_tx_fee: vi.fn(async () => ({ Ok: BigInt(1000) })),
+        invoke: vi.fn(async () => ({ Ok: true })),
+      },
+      getBtcUtxos: vi.fn(async (addr: string) => {
+        if (addr === paymentAddress) {
+          // Provide enough to cover outputs + fee + dust
+          return [
+            makeUtxo({
+              txid: "u1",
+              vout: 0,
+              satoshis: "120000",
+              scriptPk: "001234",
+              address: paymentAddress,
+              runes: [],
+            }),
+          ];
+        }
+        if (addr === poolAddress) {
+          return [
+            {
+              txid: "u3",
+              vout: 0,
+              satoshis: "50000",
+              scriptPk: "001234",
+              address: poolAddress,
+              runes: [{ id: "810000:1", amount: "50000" }],
+            },
+          ];
+        }
+
+        if (addr === richPoolAddress) {
+          return [
+            {
+              txid: "u1",
+              vout: 0,
+              satoshis: "30000",
+              scriptPk: "001234",
+              address: richPoolAddress,
+              runes: [{ id: "840000:3", amount: "10000" }],
+            },
+            {
+              txid: "u2",
+              vout: 0,
+              satoshis: "10000",
+              scriptPk: "001234",
+              address: richPoolAddress,
+              runes: [{ id: "840000:3", amount: "5000" }],
+            },
+          ];
+        }
+      }),
+      getRuneUtxos: vi.fn(async (addr: string) => {
+        if (addr === userAddress) {
+          // Provide enough to cover outputs + fee + dust
+          return [
+            {
+              txid: "u3",
+              vout: 0,
+              satoshis: "546",
+              scriptPk: "001234",
+              address: userAddress,
+              runes: [{ id: "840000:3", amount: "10000" }],
+            },
+            {
+              txid: "u4",
+              vout: 0,
+              satoshis: "546",
+              scriptPk: "001234",
+              address: userAddress,
+              runes: [{ id: "840000:3", amount: "5000" }],
+            },
+          ];
+        }
+
+        if (addr === poolAddress) {
+          return [
+            {
+              txid: "u3",
+              vout: 0,
+              satoshis: "50000",
+              scriptPk: "001234",
+              address: poolAddress,
+              runes: [{ id: "810000:1", amount: "50000" }],
+            },
+          ];
+        }
+
+        if (addr === richPoolAddress) {
+          return [
+            {
+              txid: "u1",
+              vout: 0,
+              satoshis: "30000",
+              scriptPk: "001234",
+              address: richPoolAddress,
+              runes: [{ id: "840000:3", amount: "10000" }],
+            },
+            {
+              txid: "u2",
+              vout: 0,
+              satoshis: "10000",
+              scriptPk: "001234",
+              address: richPoolAddress,
+              runes: [{ id: "840000:3", amount: "5000" }],
+            },
+          ];
+        }
+        return [];
+      }),
+    };
+  });
+
+  function makeConfig(): TransactionConfig {
+    return {
+      network: Network.Testnet,
+      exchangeId: "dummy-exchange",
+      address: userAddress,
+      paymentAddress,
+    };
+  }
+
+  it("deposit btc to pool", async () => {
+    const tx = new Transaction(makeConfig(), client);
+
+    const depositAmount = BigInt(10_000);
+    const intention: Intention = {
+      poolAddress,
+      inputCoins: [
+        {
+          coin: { id: BITCOIN_ID, value: depositAmount },
+          from: paymentAddress,
+        },
+      ],
+      outputCoins: [],
+      action: "deposit",
+      nonce: BigInt(1),
+    };
+
+    tx.addIntention(intention);
+
+    const addOutputSpy = vi.spyOn(tx as any, "addOutput");
+
+    await tx.build();
+
+    const poolBtcAmount = BigInt(50_000);
+
+    expect(addOutputSpy).toHaveBeenCalledWith(
+      poolAddress,
+      poolBtcAmount + depositAmount
+    );
+
+    // Should add change output since 120000 - 10000 - 1000 = 109000 > DUST
+    expect(addOutputSpy).toHaveBeenCalledWith(paymentAddress, BigInt(109000));
+  });
+
+  it("withdraw btc from pool", async () => {
+    const tx = new Transaction(makeConfig(), client);
+
+    const withdrawAmount = BigInt(10_000);
+    const intention: Intention = {
+      poolAddress,
+      inputCoins: [],
+      outputCoins: [
+        {
+          coin: { id: BITCOIN_ID, value: withdrawAmount },
+          to: paymentAddress,
+        },
+      ],
+      action: "withdraw",
+      nonce: BigInt(234),
+    };
+
+    tx.addIntention(intention);
+
+    const addOutputSpy = vi.spyOn(tx as any, "addOutput");
+
+    await tx.build();
+
+    const poolBtcAmount = BigInt(50_000);
+
+    expect(addOutputSpy).toHaveBeenCalledWith(
+      poolAddress,
+      poolBtcAmount - withdrawAmount
+    );
+
+    // Should add change output 50000 - 10000 = 40000
+    expect(addOutputSpy).toHaveBeenCalledWith(poolAddress, BigInt(40_000));
+  });
+
+  it("borrow btc from pool with runes", async () => {
+    const tx = new Transaction(makeConfig(), client);
+
+    const borrowAmount = BigInt(10_000);
+    const runeAmount = BigInt(12_000);
+
+    const richPoolRuneAmount = BigInt(10_000);
+    const totalInputRuneAmount = BigInt(15_000);
+
+    const intention: Intention = {
+      poolAddress: richPoolAddress,
+      inputCoins: [
+        {
+          coin: { id: "840000:3", value: runeAmount },
+          from: userAddress,
+        },
+      ],
+      outputCoins: [
+        {
+          coin: { id: BITCOIN_ID, value: borrowAmount },
+          to: paymentAddress,
+        },
+      ],
+      action: "borrow",
+      nonce: BigInt(234),
+    };
+
+    tx.addIntention(intention);
+
+    const addOutputSpy = vi.spyOn(tx as any, "addOutput");
+
+    const addScriptOutputSpy = vi.spyOn(tx as any, "addScriptOutput");
+
+    await tx.build();
+
+    const richPoolBtcAmount = BigInt(30_000);
+
+    expect(addOutputSpy).toHaveBeenCalledWith(
+      richPoolAddress,
+      richPoolBtcAmount - borrowAmount
+    );
+
+    expect(addOutputSpy).toHaveBeenCalledWith(paymentAddress, BigInt(10000));
+
+    const runeId = new RuneId(840000, 3);
+
+    const edicts: Edict[] = [
+      new Edict(runeId, richPoolRuneAmount + runeAmount, 1),
+      new Edict(runeId, totalInputRuneAmount - runeAmount, 2),
+    ];
+    const runestone = new Runestone(edicts, none(), none(), none());
+    expect(addScriptOutputSpy).toHaveBeenCalledWith(
+      new Uint8Array(runestone.encipher())
     );
   });
 
-  describe("User needs to pay BTC (positive btcAmount)", () => {
-    it("should select sufficient UTXOs and calculate fees", async () => {
-      // Mock fee estimation
-      mockOrchestrator.estimate_min_tx_fee.mockResolvedValue({
-        Ok: BigInt(1000),
-      });
-
-      const mockUtxos: Utxo[] = [
-        {
-          txid: "tx1",
-          vout: 0,
-          satoshis: "200000",
-          scriptPk: "001234",
-          address: "tb1qpayment123",
-          runes: [],
-        },
-        {
-          txid: "tx2",
-          vout: 1,
-          satoshis: "300000",
-          scriptPk: "001234",
-          address: "tb1qpayment123",
-          runes: [],
-        },
-      ];
-
-      const addOutputSpy = vi.spyOn(transaction as any, "addOutput");
-
-      // User needs to pay 150000 sats
-      await transaction["addBtcAndFees"](mockUtxos, BigInt(150000));
-
-      // Should select first UTXO (200000 sats) which is sufficient
-      // Should add change output since 200000 - 150000 - 1000 = 49000 > DUST
-
-      expect(addOutputSpy).toHaveBeenCalledWith(
-        mockConfig.paymentAddress,
-        BigInt(49000)
-      );
+  it("throws when BTC UTXOs are insufficient to cover amount+fee", async () => {
+    // Provide too-small UTXO set
+    client.getBtcUtxos = vi.fn(async (addr: string) => {
+      if (addr === paymentAddress) {
+        return [
+          makeUtxo({
+            satoshis: (Number(UTXO_DUST) - 1).toString(),
+            address: paymentAddress,
+          }),
+        ];
+      }
+      return [];
     });
 
-    it("should select multiple UTXOs when single UTXO insufficient", async () => {
-      mockOrchestrator.estimate_min_tx_fee.mockResolvedValue({
-        Ok: BigInt(2000),
-      });
-
-      const mockUtxos: Utxo[] = [
+    const tx = new Transaction(makeConfig(), client);
+    tx.addIntention({
+      poolAddress,
+      inputCoins: [
         {
-          txid: "tx1",
-          vout: 0,
-          satoshis: "100000", // Not enough alone
-          scriptPk: "001234",
-          address: "tb1qpayment123",
-          runes: [],
+          coin: { id: BITCOIN_ID, value: BigInt(5_000) },
+          from: paymentAddress,
         },
-        {
-          txid: "tx2",
-          vout: 1,
-          satoshis: "200000",
-          scriptPk: "001234",
-          address: "tb1qpayment123",
-          runes: [],
-        },
-      ];
-
-      // User needs to pay 250000 sats
-      await transaction["addBtcAndFees"](mockUtxos, BigInt(250000));
-
-      // Should select both UTXOs (total 300000 sats)
-      expect(mockOrchestrator.estimate_min_tx_fee).toHaveBeenCalled();
+      ],
+      outputCoins: [],
+      action: "swap",
+      nonce: BigInt(2),
     });
 
-    it("should throw error when insufficient UTXOs", async () => {
-      mockOrchestrator.estimate_min_tx_fee.mockResolvedValue({
-        Ok: BigInt(1000),
-      });
-
-      const mockUtxos: Utxo[] = [
-        {
-          txid: "tx1",
-          vout: 0,
-          satoshis: "50000", // Too small
-          scriptPk: "001234",
-          address: "tb1qpayment123",
-          runes: [],
-        },
-      ];
-
-      await expect(
-        transaction["addBtcAndFees"](mockUtxos, BigInt(100000))
-      ).rejects.toThrow("Insufficient BTC UTXOs");
-    });
+    await expect(tx.build()).rejects.toThrow();
   });
 
-  describe("User receives BTC (negative btcAmount)", () => {
-    it("should only pay fees when user receives BTC", async () => {
-      mockOrchestrator.estimate_min_tx_fee.mockResolvedValue({
-        Ok: BigInt(1500),
-      });
+  it("swap some btc to rune", async () => {
+    const tx = new Transaction(makeConfig(), client);
 
-      const mockUtxos: Utxo[] = [
+    const inputBtcAmount = BigInt(100);
+    const outRuneAmount = BigInt(12_000);
+    const richPoolRuneAmount = BigInt(15_000);
+
+    tx.addIntention({
+      poolAddress: richPoolAddress,
+      inputCoins: [
         {
-          txid: "tx1",
-          vout: 0,
-          satoshis: "100000",
-          scriptPk: "001234",
-          address: "tb1qpayment123",
-          runes: [],
+          coin: { id: "0:0", value: inputBtcAmount },
+          from: paymentAddress,
         },
-      ];
-
-      // User receives 50000 sats (negative amount)
-      await transaction["addBtcAndFees"](mockUtxos, BigInt(-50000));
-
-      // Should only need to cover fees (1500 sats)
-      expect(mockOrchestrator.estimate_min_tx_fee).toHaveBeenCalled();
+      ],
+      outputCoins: [
+        {
+          coin: { id: "840000:3", value: outRuneAmount },
+          to: userAddress,
+        },
+      ],
+      action: "swap",
+      nonce: BigInt(3),
     });
+
+    const addScriptOutputSpy = vi.spyOn(tx as any, "addScriptOutput");
+
+    await tx.build();
+
+    const runeId = new RuneId(840000, 3);
+
+    const edicts: Edict[] = [
+      new Edict(runeId, outRuneAmount, 1),
+      new Edict(runeId, richPoolRuneAmount - outRuneAmount, 2),
+    ];
+    const runestone = new Runestone(edicts, none(), none(), none());
+    expect(addScriptOutputSpy).toHaveBeenCalledWith(
+      new Uint8Array(runestone.encipher())
+    );
   });
 
-  describe("Zero BTC amount (only fees)", () => {
-    it("should only select UTXOs for fees", async () => {
-      mockOrchestrator.estimate_min_tx_fee.mockResolvedValue({
-        Ok: BigInt(800),
-      });
+  it("extract_protocol_fee and donate to rich pool", async () => {
+    const tx = new Transaction(makeConfig(), client);
 
-      const mockUtxos: Utxo[] = [
+    const protocolFee = BigInt(100);
+
+    tx.addIntention({
+      poolAddress,
+      inputCoins: [],
+      outputCoins: [
         {
-          txid: "tx1",
-          vout: 0,
-          satoshis: "50000",
-          scriptPk: "001234",
-          address: "tb1qpayment123",
-          runes: [],
+          coin: { id: "0:0", value: protocolFee },
+          to: richPoolAddress,
         },
-      ];
-
-      await transaction["addBtcAndFees"](mockUtxos, BigInt(0));
-
-      expect(mockOrchestrator.estimate_min_tx_fee).toHaveBeenCalled();
-      // Should select UTXO to cover 800 sats fee
-      // Should add change output: 50000 - 800 = 49200 > DUST
-    });
-  });
-
-  describe("Fee iteration logic", () => {
-    it("should iterate until fee converges", async () => {
-      // Mock fee estimation to return different values on subsequent calls
-      mockOrchestrator.estimate_min_tx_fee
-        .mockResolvedValueOnce({ Ok: BigInt(1000) })
-        .mockResolvedValueOnce({ Ok: BigInt(1200) })
-        .mockResolvedValueOnce({ Ok: BigInt(1200) }); // Converged
-
-      const mockUtxos: Utxo[] = [
-        {
-          txid: "tx1",
-          vout: 0,
-          satoshis: "100000",
-          scriptPk: "001234",
-          address: "tb1qpayment123",
-          runes: [],
-        },
-        {
-          txid: "tx2",
-          vout: 1,
-          satoshis: "200000",
-          scriptPk: "001234",
-          address: "tb1qpayment123",
-          runes: [],
-        },
-      ];
-
-      await transaction["addBtcAndFees"](mockUtxos, BigInt(50000));
-
-      // Should call estimate_min_tx_fee multiple times until convergence
-      expect(mockOrchestrator.estimate_min_tx_fee).toHaveBeenCalledTimes(3);
-    });
-  });
-
-  describe("Change output handling", () => {
-    it("should add change output when change > DUST", async () => {
-      mockOrchestrator.estimate_min_tx_fee.mockResolvedValue({
-        Ok: BigInt(1000),
-      });
-
-      const mockUtxos: Utxo[] = [
-        {
-          txid: "tx1",
-          vout: 0,
-          satoshis: "100000",
-          scriptPk: "001234",
-          address: "tb1qpayment123",
-          runes: [],
-        },
-      ];
-
-      const addOutputSpy = vi.spyOn(transaction as any, "addOutput");
-
-      await transaction["addBtcAndFees"](mockUtxos, BigInt(10000));
-
-      // Change = 100000 - 10000 - 1000 = 89000 > DUST
-      expect(addOutputSpy).toHaveBeenCalledWith(
-        mockConfig.paymentAddress,
-        BigInt(89000)
-      );
+      ],
+      action: "extract_protocol_fee",
+      nonce: BigInt(1),
     });
 
-    it("should not add change output when change <= DUST", async () => {
-      mockOrchestrator.estimate_min_tx_fee.mockResolvedValue({
-        Ok: BigInt(1000),
-      });
-
-      const mockUtxos: Utxo[] = [
+    tx.addIntention({
+      poolAddress: richPoolAddress,
+      inputCoins: [
         {
-          txid: "tx1",
-          vout: 0,
-          satoshis: "11500", // Small UTXO
-          scriptPk: "001234",
-          address: "tb1qpayment123",
-          runes: [],
+          coin: { id: "0:0", value: protocolFee },
+          from: poolAddress,
         },
-      ];
-
-      const addOutputSpy = vi.spyOn(transaction as any, "addOutput");
-
-      await transaction["addBtcAndFees"](mockUtxos, BigInt(10000));
-
-      // Change = 11500 - 10000 - 1000 = 500 <= DUST (546)
-      expect(addOutputSpy).not.toHaveBeenCalled();
+      ],
+      outputCoins: [],
+      action: "donate",
+      nonce: BigInt(2),
     });
+
+    const addOutputSpy = vi.spyOn(tx as any, "addOutput");
+    const addScriptOutputSpy = vi.spyOn(tx as any, "addScriptOutput");
+    await tx.build();
+
+    const richPoolBtcAmount = BigInt(40000);
+    const richPoolRuneAmount = BigInt(15_000);
+    const poolRuneAmount = BigInt(50_000);
+
+    expect(addOutputSpy).toHaveBeenCalledWith(
+      richPoolAddress,
+      richPoolBtcAmount + protocolFee
+    );
+
+    const runeId = new RuneId(840000, 3);
+
+    const edicts: Edict[] = [
+      new Edict(runeId, richPoolRuneAmount, 1),
+      new Edict(new RuneId(810000, 1), poolRuneAmount, 2),
+    ];
+    const runestone = new Runestone(edicts, none(), none(), none());
+    expect(addScriptOutputSpy).toHaveBeenCalledWith(
+      new Uint8Array(runestone.encipher())
+    );
   });
 });

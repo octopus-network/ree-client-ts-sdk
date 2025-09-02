@@ -5,7 +5,8 @@ import { RuneId, Edict, Runestone, none } from "runelib";
 import * as bitcoin from "bitcoinjs-lib";
 import { toBitcoinNetwork, getAddressType, hexToBytes } from "../utils";
 import { UTXO_DUST, BITCOIN_ID } from "../constants";
-import { type ActorSubclass } from "@dfinity/agent";
+
+import type { ReeClient } from "../client";
 
 /**
  * Transaction builder for Bitcoin and Rune transactions
@@ -13,6 +14,7 @@ import { type ActorSubclass } from "@dfinity/agent";
  */
 export class Transaction {
   private psbt: bitcoin.Psbt;
+  private client: ReeClient;
   private inputAddressTypes: AddressType[] = [];
   private outputAddressTypes: AddressType[] = [];
   private config: TransactionConfig;
@@ -20,35 +22,21 @@ export class Transaction {
   /** Track dust amounts from user input UTXOs for fee calculation */
   private userInputUtxoDusts = BigInt(0);
 
-  /** Orchestrator actor for fee estimation */
-  readonly orchestrator: ActorSubclass;
-
   private intentions: Intention[] = [];
   private txFee: bigint = BigInt(0);
 
   private additionalDustNeeded = BigInt(0);
 
   private inputUtxos: Utxo[] = [];
-  private getBtcUtxos: (address: string) => Promise<Utxo[]>;
-  private getRuneUtxos: (address: string, runeId: string) => Promise<Utxo[]>;
 
-  constructor(
-    config: TransactionConfig,
-    orchestrator: ActorSubclass,
-    utxoFetchers: {
-      btc: (address: string) => Promise<Utxo[]>;
-      rune: (address: string, runeId: string) => Promise<Utxo[]>;
-    }
-  ) {
+  constructor(config: TransactionConfig, client: ReeClient) {
     this.config = config;
 
     this.psbt = new bitcoin.Psbt({
       network: toBitcoinNetwork(config.network),
     });
 
-    this.orchestrator = orchestrator;
-    this.getBtcUtxos = utxoFetchers.btc;
-    this.getRuneUtxos = utxoFetchers.rune;
+    this.client = client;
   }
 
   /**
@@ -218,6 +206,8 @@ export class Transaction {
     const paymentAddress = this.config.paymentAddress;
     const additionalDustNeeded = this.additionalDustNeeded;
 
+    const userInputUtxoDusts = this.userInputUtxoDusts;
+
     this.outputAddressTypes.push(getAddressType(paymentAddress));
 
     let lastFee = BigInt(0);
@@ -233,7 +223,7 @@ export class Transaction {
       lastFee = currentFee;
 
       // Get fee estimate from orchestrator
-      const res = (await this.orchestrator.estimate_min_tx_fee({
+      const res = (await this.client.orchestrator.estimate_min_tx_fee({
         input_types: this.inputAddressTypes,
         pool_address: this.intentions.map((i) => i.poolAddress),
         output_types: this.outputAddressTypes,
@@ -241,7 +231,7 @@ export class Transaction {
 
       currentFee = res.Ok;
       targetBtcAmount =
-        btcAmount + currentFee + additionalDustNeeded - this.userInputUtxoDusts;
+        btcAmount + currentFee + additionalDustNeeded - userInputUtxoDusts;
 
       // Select UTXOs if fee increased and we need more BTC
       if (currentFee > lastFee && targetBtcAmount > 0) {
@@ -299,6 +289,26 @@ export class Transaction {
     this.txFee = discardedSats + currentFee;
   }
 
+  /**
+   * Resolve and fetch all UTXOs required by the current intention set, grouped by address.
+   *
+   * How it works:
+   * - Scans every intention to determine, per address, whether BTC UTXOs are needed and which rune IDs are needed.
+   *   • For inputCoins, uses their `from` address.
+   *   • For outputCoins, uses their `to` address.
+   *   • Pool address is always considered “involved” for any coin that appears in the intention.
+   *   • The user's payment address is always flagged as needing BTC (to pay fees/change).
+   * - Deduplicates addresses and rune IDs, then fetches UTXOs in parallel via the client:
+   *   • BTC UTXOs: client.getBtcUtxos(address)
+   *   • Rune UTXOs: client.getRuneUtxos(address, runeId)
+   * - Any fetch error is treated as an empty list for robustness.
+   *
+   * Returns:
+   * - An object with two maps:
+   *   • btc: Record<address, Utxo[]>
+   *   • rune: Record<address, Record<runeId, Utxo[]>>
+   */
+
   private async getInvolvedAddressUtxos(): Promise<{
     btc: Record<string, Utxo[]>;
     rune: Record<string, Record<string, Utxo[]>>;
@@ -310,6 +320,8 @@ export class Transaction {
       string,
       { needBtc: boolean; runeIds: Set<string> }
     >();
+
+    const poolAddresses = this.intentions.map((i) => i.poolAddress);
 
     // Payment address always needs BTC
     needMap.set(this.config.paymentAddress, {
@@ -362,7 +374,10 @@ export class Transaction {
       Array.from(needMap.entries()).map(async ([address, need]) => {
         if (need.needBtc) {
           try {
-            btc[address] = await this.getBtcUtxos(address);
+            btc[address] = await this.client.getBtcUtxos(
+              address,
+              !poolAddresses.includes(address)
+            );
           } catch {
             btc[address] = [];
           }
@@ -372,7 +387,7 @@ export class Transaction {
           await Promise.all(
             Array.from(need.runeIds).map(async (runeId) => {
               try {
-                rune[address][runeId] = await this.getRuneUtxos(
+                rune[address][runeId] = await this.client.getRuneUtxos(
                   address,
                   runeId
                 );
@@ -388,6 +403,34 @@ export class Transaction {
     return { btc, rune };
   }
 
+  /**
+   * Select inputs (UTXOs) according to the intentions and compute the coin outputs per address.
+   *
+   * Inputs:
+   * - addressUtxos: UTXOs grouped as returned by getInvolvedAddressUtxos().
+   *
+   * Algorithm (high level):
+   * 1) Validate there is at least one intention.
+   * 2) For each intention, ensure symmetry between inputCoins and outputCoins around the pool:
+   *    - If a coin is sent from an address to the pool but not listed as output to the pool, add an output-to-pool entry.
+   *    - If a coin is received from the pool by an address but not listed as input-from-pool, add an input-from-pool entry.
+   * 3) Aggregate per-address input and output coin amounts (addressInputCoinAmounts, addressOutputCoinAmounts).
+   * 4) For each [address, coinId] in the input amounts:
+   *    - BTC (coinId === BITCOIN_ID):
+   *      • If address is the user's payment address, we treat it specially by decrementing its BTC in addressOutputCoinAmounts
+   *        (the actual funding and fee handling will be done later in addBtcAndFees).
+   *      • Otherwise, select BTC UTXOs (preferring rune-free for non-pool addresses), add them as inputs, compute change and
+   *        add that change to addressOutputCoinAmounts[address]. If the address is a pool, also credit any rune balances
+   *        contained in selected pool BTC UTXOs to addressOutputCoinAmounts for later distribution.
+   *    - Rune (coinId !== BITCOIN_ID): select rune UTXOs for the required runeId, add as inputs, compute rune change and add
+   *      to addressOutputCoinAmounts[address].
+   * 5) Ensure all pool UTXOs are included: for pool addresses that only appear on the receiving side, add all their BTC/rune
+   *    UTXOs as inputs and credit their total balances into addressOutputCoinAmounts accordingly.
+   *
+   * Returns:
+   * - addressOutputCoinAmounts: Record<address, Record<coinId, bigint>> — the final coin amounts to be sent to each address.
+   */
+
   private addInputsAndCalculateOutputs(addressUtxos: {
     btc: Record<string, Utxo[]>;
     rune: Record<string, Record<string, Utxo[]>>;
@@ -401,15 +444,43 @@ export class Transaction {
     const addressInputCoinAmounts: Record<string, Record<string, bigint>> = {};
     const addressOutputCoinAmounts: Record<string, Record<string, bigint>> = {};
 
-    this.intentions.forEach(({ inputCoins, outputCoins }) => {
-      inputCoins.forEach(({ coin, from }) => {
+    this.intentions.forEach(({ poolAddress, inputCoins, outputCoins }) => {
+      const inputCoinsClone = [...inputCoins];
+      const outputCoinsClone = [...outputCoins];
+      inputCoinsClone.forEach(({ coin, from }) => {
+        // if coin is not output to pool, add it to outputCoins
+        if (
+          !outputCoinsClone.find((c) => c.coin.id === coin.id) &&
+          !poolAddresses.includes(from)
+        ) {
+          outputCoinsClone.push({
+            coin,
+            to: poolAddress,
+          });
+        }
+      });
+
+      outputCoinsClone.forEach(({ coin, to }) => {
+        // if coin is not input from pool, add it to inputCoins
+        if (
+          !inputCoinsClone.find((c) => c.coin.id === coin.id) &&
+          !poolAddresses.includes(to)
+        ) {
+          inputCoinsClone.push({
+            coin,
+            from: poolAddress,
+          });
+        }
+      });
+
+      inputCoinsClone.forEach(({ coin, from }) => {
         addressInputCoinAmounts[from] ??= {};
         addressInputCoinAmounts[from][coin.id] =
           (addressInputCoinAmounts[from][coin.id] ?? BigInt(0)) +
           BigInt(coin.value);
       });
 
-      outputCoins.forEach(({ coin, to }) => {
+      outputCoinsClone.forEach(({ coin, to }) => {
         addressOutputCoinAmounts[to] ??= {};
         addressOutputCoinAmounts[to][coin.id] =
           (addressOutputCoinAmounts[to][coin.id] ?? BigInt(0)) +
@@ -456,7 +527,18 @@ export class Transaction {
           }
 
           // Add as inputs
-          selectedUtxos.forEach((utxo) => this.addInput(utxo));
+          selectedUtxos.forEach((utxo) => {
+            this.addInput(utxo);
+            // If pool address, add rune amounts to output coin amounts
+            if (poolAddresses.includes(address)) {
+              utxo.runes.forEach((rune) => {
+                addressOutputCoinAmounts[address] ??= {};
+                addressOutputCoinAmounts[address][rune.id] =
+                  (addressOutputCoinAmounts[address][rune.id] ?? BigInt(0)) +
+                  BigInt(rune.amount);
+              });
+            }
+          });
         } else {
           // Select Rune UTXOs
 
@@ -549,6 +631,23 @@ export class Transaction {
     return addressOutputCoinAmounts;
   }
 
+  /**
+   * Materialize outputs from the computed addressReceiveCoinAmounts.
+   *
+   * Steps:
+   * 1) Collect all rune IDs present across recipients. If any runes are to be transferred, first build a Runestone (edicts)
+   *    and add an OP_RETURN output (at index 0). Edicts reference subsequent output indices.
+   * 2) For each address that receives runes, also ensure a BTC output exists at that index:
+   *    - If an explicit BTC amount is provided for the address and the address is not the user's own rune address, use it.
+   *    - Otherwise, add a dust-sized BTC output (UTXO_DUST) to carry the runes, and track additionalDustNeeded for fees.
+   *    After using an explicit BTC amount for a rune recipient, remove it from the remaining BTC-only outputs map.
+   * 3) Finally, add any remaining BTC-only outputs where amount > 0.
+   *
+   * Notes:
+   * - Output values are bigint; scripts use Uint8Array, compatible with bitcoinjs-lib v7.
+   * - Output ordering: OP_RETURN (if any) first, then rune recipients in the order we build edicts, then remaining BTC outputs.
+   */
+
   private addOutputs(
     addressReceiveCoinAmounts: Record<string, Record<string, bigint>>
   ) {
@@ -598,12 +697,15 @@ export class Transaction {
       targetAddresses.forEach((address) => {
         const btcAmount =
           addressReceiveCoinAmounts[address]?.[BITCOIN_ID] ?? BigInt(0);
-        const outputAmount = btcAmount > BigInt(0) ? btcAmount : UTXO_DUST;
+        const outputAmount =
+          btcAmount > BigInt(0) && address !== this.config.address
+            ? btcAmount
+            : UTXO_DUST;
 
         this.addOutput(address, outputAmount);
 
         // If we used the BTC amount, remove it from remaining amounts
-        if (btcAmount > BigInt(0)) {
+        if (btcAmount > BigInt(0) && address !== this.config.address) {
           delete addressReceiveCoinAmounts[address][BITCOIN_ID];
         } else {
           // Track additional dust needed for fee calculation
@@ -683,7 +785,10 @@ export class Transaction {
     const userOutputBtcAmount =
       addressOutputCoinAmounts[paymentAddress]?.[BITCOIN_ID] ?? BigInt(0);
 
-    await this.addBtcAndFees(userBtcUtxos, -userOutputBtcAmount);
+    await this.addBtcAndFees(
+      userBtcUtxos,
+      userOutputBtcAmount < 0 ? -userOutputBtcAmount : BigInt(0)
+    );
 
     return this.psbt;
   }
@@ -707,8 +812,9 @@ export class Transaction {
     if (!this.intentions.length) {
       throw new Error("No itentions added");
     }
+
     return (
-      this.orchestrator
+      this.client.orchestrator
         .invoke({
           intention_set: {
             tx_fee_in_sats: this.txFee,

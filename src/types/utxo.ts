@@ -28,6 +28,13 @@ export type RawRuneUtxo = {
   }[];
 };
 
+export type RawRuneInfo = {
+  id: string;
+  symbol: string;
+  spaced_name: string;
+  divisibility: number;
+};
+
 export type Utxo = {
   txid: string;
   vout: number;

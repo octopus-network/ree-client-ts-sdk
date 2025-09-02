@@ -18,7 +18,8 @@ export type { Pool, PoolInfo } from "./types/pool";
 export type {
   TransactionConfig,
   Intention,
-  CoinBalance,
+  InputCoin,
+  OutputCoin,
 } from "./types/transaction";
 
 export type { AddressType } from "./types/address";

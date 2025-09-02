@@ -108,13 +108,20 @@ export class ReeClient {
    * Handles pagination automatically to fetch all available UTXOs
    * @returns Array of Bitcoin UTXOs
    */
-  async getBtcUtxos(paymentAddress: string): Promise<Utxo[]> {
+  async getBtcUtxos(
+    paymentAddress: string,
+    excludeMetaprotocols = true
+  ): Promise<Utxo[]> {
     let cursor = null;
     const data = [];
 
     // Paginate through all UTXOs
     do {
-      const res = await this.maestro.utxosByAddress(paymentAddress, cursor);
+      const res = await this.maestro.utxosByAddress(
+        paymentAddress,
+        cursor,
+        excludeMetaprotocols
+      );
       data.push(...res.data);
       cursor = res.next_cursor;
     } while (cursor !== null);
@@ -125,10 +132,17 @@ export class ReeClient {
         txid,
         vout,
         address,
-        runes: runes.map(({ rune_id, amount }) => ({
-          id: rune_id,
-          amount,
-        })),
+        runes: runes.map(({ rune_id, amount }) => {
+          const divisibility = (amount.split(".")[1] ?? "").length;
+          const rawAmount = new Decimal(amount)
+            .mul(10 ** divisibility)
+            .toFixed(0);
+
+          return {
+            id: rune_id,
+            amount: rawAmount,
+          };
+        }),
         satoshis,
         scriptPk: script_pubkey,
       })
@@ -164,10 +178,17 @@ export class ReeClient {
         txid,
         vout,
         address,
-        runes: runes.map(({ rune_id, amount }) => ({
-          id: rune_id,
-          amount,
-        })),
+        runes: runes.map(({ rune_id, amount }) => {
+          const divisibility = (amount.split(".")[1] ?? "").length;
+          const rawAmount = new Decimal(amount)
+            .mul(10 ** divisibility)
+            .toFixed(0);
+
+          return {
+            id: rune_id,
+            amount: rawAmount,
+          };
+        }),
         satoshis,
         scriptPk: bytesToHex(scriptPk),
       };
@@ -362,11 +383,7 @@ export class ReeClient {
         address,
         paymentAddress,
       },
-      this.orchestrator,
-      {
-        btc: this.getBtcUtxos,
-        rune: this.getRuneUtxos,
-      }
+      this
     );
   }
 }

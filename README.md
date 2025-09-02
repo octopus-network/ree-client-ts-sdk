@@ -68,20 +68,30 @@ const poolInfo = await client.getPoolInfo("pool-address");
 ```typescript
 // Create a transaction for a single pool operation
 const transaction = await client.createTransaction({
-  address: "bc1q...", // Bitcoin address for runes
+  address: "bc1p...", // Bitcoin address for runes
   paymentAddress: "bc1q...", // Payment address for BTC
-  involvedPoolAddresses: ["bc1q..."], // Pool addresses involved
-  involvedRuneIds: ["840000:3"], // Optional: rune IDs if trading runes
 });
 
 // Add a single intention (e.g., swap BTC for runes)
 transaction.addIntention({
-  poolAddress: "bc1q...",
+  poolAddress: "bc1p...",
   inputCoins: [
-    { id: "0:0", value: BigInt(100000) }, // Send 0.001 BTC
+    {
+      coin: { 
+        id: "0:0", 
+        value: BigInt(100000) 
+      }, // Send 0.001 BTC,
+      from: paymentAddress,
+    },
   ],
   outputCoins: [
-    { id: "840000:3", value: BigInt(1000) }, // Receive 1000 runes
+    {
+      coin: { 
+        id: "840000:3", 
+        value: BigInt(1000) 
+      }, // Receive 1000 runes,
+      to: address,
+    },
   ],
   action: "swap",
   nonce: BigInt(1234),
@@ -98,18 +108,23 @@ const result = await transaction.send(signedPsbt.toHex());
 ```typescript
 // Create a complex transaction with multiple operations
 const transaction = await client.createTransaction({
-  address: "bc1q...",
+  address: "bc1p...",
   paymentAddress: "bc1q...",
-  involvedPoolAddresses: ["bc1q...pool1", "bc1q...pool2"],
-  involvedRuneIds: ["840000:3", "840000:5"],
 });
 
 // Add multiple intentions in a single transaction
 // Intention 1: Deposit BTC to Pool 1
 transaction.addIntention({
-  poolAddress: "bc1q...pool1",
+  poolAddress: "bc1p...pool1",
   inputCoins: [
-    { id: "0:0", value: BigInt(50000) }, // Deposit 0.0005 BTC
+    {
+      // Deposit 0.0005 BTC
+      coin: { 
+        id: "0:0", 
+        value: BigInt(50000) 
+      },
+      from: paymentAddress,
+    },
   ],
   outputCoins: [],
   action: "deposit",
@@ -120,10 +135,24 @@ transaction.addIntention({
 transaction.addIntention({
   poolAddress: "bc1q...pool2",
   inputCoins: [
-    { id: "840000:3", value: BigInt(500) }, // Send 500 of rune A
+    {
+      // Send 500 of rune A,
+      coin: { 
+        id: "840000:3", 
+        value: BigInt(500) 
+      },
+      from: address,
+    },
   ],
   outputCoins: [
-    { id: "840000:5", value: BigInt(250) }, // Receive 250 of rune B
+    {
+      // Receive 250 of rune B,
+      coin: { 
+        id: "840000:5", 
+        value: BigInt(250) 
+      },
+      to: address,
+    },
   ],
   action: "swap",
   nonce: BigInt(Date.now() + 1),
@@ -149,7 +178,7 @@ function App() {
 }
 
 function WalletComponent() {
-  const { client, address, updateWallet, createTransaction } = useRee();
+  const { client, address, paymentAddress, updateWallet, createTransaction } = useRee();
   const { balance: btcBalance } = useBtcBalance();
 
   const connectWallet = () => {
@@ -161,24 +190,45 @@ function WalletComponent() {
 
   const executeComplexTransaction = async () => {
     // Create transaction with multiple pools
-    const tx = await createTransaction({
-      involvedPoolAddresses: ["pool1", "pool2"],
-      involvedRuneIds: ["840000:3"],
-    });
+    const tx = await createTransaction();
 
     // Add multiple intentions
     tx.addIntention({
       poolAddress: "pool1",
-      inputCoins: [{ id: "0:0", value: BigInt(100000) }],
-      outputCoins: [{ id: "840000:3", value: BigInt(1000) }],
+      inputCoins: [{
+        coin: { 
+          id: "0:0", 
+          value: BigInt(100000) 
+        },
+        from: paymentAddress
+      }],
+      outputCoins: [
+        coint: { 
+          id: "840000:3", 
+          value: BigInt(1000)
+        },
+        to: address
+      ],
       action: "swap",
       nonce: BigInt(Date.now()),
     });
 
     tx.addIntention({
       poolAddress: "pool2",
-      inputCoins: [{ id: "840000:3", value: BigInt(500) }],
-      outputCoins: [{ id: "0:0", value: BigInt(50000) }],
+      inputCoins: [{
+        coin: { 
+          id: "840000:3", 
+          value: BigInt(500) 
+        },
+        from: address
+      }],
+      outputCoins: [{
+        coin: { 
+          id: "0:0", 
+          value: BigInt(50000) 
+        },
+        to: paymentAddress
+      }],
       action: "swap",
       nonce: BigInt(Date.now() + 1),
     });
@@ -228,13 +278,17 @@ function MyComponent({ children }) {
       value: depositBtcAmount,
     });
 
-    const tx = await createTransaction({
-      involvedPoolAddresses: ["bc1q..."],
-    });
+    const tx = await createTransaction();
 
     tx.addIntention({
       poolAddress: "bc1q...",
-      inputCoins: [{ id: "0:0", value: depositBtcAmount }],
+      inputCoins: [{
+        coin: { 
+          id: "0:0", 
+          value: depositBtcAmount 
+        },
+        from: paymentAddress
+      }],
       outputCoins: [],
       action: "deposit",
       nonce: depositOffer.nonce,
@@ -307,7 +361,7 @@ new ReeClient(config: Config)
 
 ##### Transaction Methods
 
-- `createTransaction(params): Promise<Transaction>` - Create a transaction for trading with a liquidity pool
+- `createTransaction(): Promise<Transaction>` - Create a transaction
 
 ### Transaction
 
@@ -324,17 +378,28 @@ Transaction builder for Bitcoin and Rune transactions with multi-intention suppo
 ```typescript
 interface Intention {
   poolAddress: string; // Target pool address
-  inputCoins: CoinBalance[]; // Coins being sent to the pool
-  outputCoins: CoinBalance[]; // Coins expected from the pool
+  inputCoins: InputCoin[]; // Coins being sent to the pool
+  outputCoins: InputCoin[]; // Coins expected from the pool
   action: string; // Action type (swap, deposit, withdraw, etc.)
   actionParams?: string; // Optional action parameters
   nonce: bigint; // Unique nonce for the intention
 }
 
-interface CoinBalance {
+type CoinBalance = {
   id: string; // Coin ID ("0:0" for BTC, "840000:3" for runes)
   value: bigint; // Amount in smallest unit
 }
+
+ type InputCoin = {
+  coin: CoinBalance;
+  from: string;
+};
+
+type OutputCoin = {
+  coin: CoinBalance;
+  to: string;
+};
+
 ```
 
 ### Multi-Intention Transaction Benefits
@@ -495,34 +560,3 @@ enum Network {
 }
 ```
 
-## Error Handling
-
-```typescript
-try {
-  const transaction = await client.createTransaction({
-    address: "bc1q...",
-    paymentAddress: "bc1q...",
-    involvedPoolAddresses: ["bc1q..."],
-  });
-
-  transaction.addIntention({
-    poolAddress: "bc1q...",
-    inputCoins: [{ id: "0:0", value: BigInt(100000) }],
-    outputCoins: [{ id: "840000:3", value: BigInt(1000) }],
-    action: "swap",
-    nonce: BigInt(Date.now()),
-  });
-
-  const psbt = await transaction.build();
-  const signedPsbt = await wallet.signPsbt(psbt);
-  const result = await transaction.send(signedPsbt.toHex());
-} catch (error) {
-  if (error.message.includes("INSUFFICIENT")) {
-    console.error("Insufficient funds:", error);
-  } else if (error.message.includes("Pool")) {
-    console.error("Pool error:", error);
-  } else {
-    console.error("Transaction failed:", error);
-  }
-}
-```

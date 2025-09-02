@@ -1,6 +1,5 @@
 import axios, { type AxiosInstance } from "axios";
-import type { RawBtcUtxo, RawRuneUtxo } from "../types/utxo";
-import type { RawInscription } from "../types/inscription";
+import type { RawBtcUtxo, RawRuneUtxo, RawRuneInfo } from "../types/utxo";
 
 export class Maestro {
   private axios: AxiosInstance;
@@ -16,7 +15,11 @@ export class Maestro {
     });
   }
 
-  async utxosByAddress(address: string, cursor?: string | null) {
+  async utxosByAddress(
+    address: string,
+    cursor?: string | null,
+    excludeMetaprotocols = true
+  ) {
     const res = await this.axios
       .get<{
         next_cursor: string | null;
@@ -26,32 +29,13 @@ export class Maestro {
         };
         data: RawBtcUtxo[];
       }>(
-        `/addresses/${address}/utxos?filter_dust=true&filter_dust_threshold=547&exclude_metaprotocols=true&order=asc&count=100${
+        `/addresses/${address}/utxos?filter_dust=true&filter_dust_threshold=547&exclude_metaprotocols=${excludeMetaprotocols}&order=asc&count=100${
           cursor ? `&cursor=${cursor}` : ""
         }`
       )
       .then((res) => res.data);
 
     return res;
-  }
-
-  async inscriptionsByAddress(address: string, cursor?: string | null) {
-    const response = await this.axios
-      .get<{
-        next_cursor: string | null;
-        last_updated: {
-          block_hash: string;
-          block_height: bigint;
-        };
-        data: RawInscription[];
-      }>(
-        `/addresses/${address}/inscriptions?count=100${
-          cursor ? `&cursor=${cursor}` : ""
-        }`
-      )
-      .then((res) => res.data);
-
-    return response;
   }
 
   async inscriptionIdsByCollectionSymbol(
@@ -94,6 +78,20 @@ export class Maestro {
           cursor ? `&cursor=${cursor}` : ""
         }`
       )
+      .then((res) => res.data);
+
+    return response;
+  }
+
+  async runeInfo(runeId: string) {
+    const response = await this.axios
+      .get<{
+        last_updated: {
+          block_hash: string;
+          block_height: bigint;
+        };
+        data: RawRuneInfo;
+      }>(`/assets/runes/${runeId}`)
       .then((res) => res.data);
 
     return response;
