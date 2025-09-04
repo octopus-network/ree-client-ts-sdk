@@ -117,6 +117,7 @@ const transaction = await client.createTransaction({
 // Intention 1: Deposit BTC to Pool 1
 transaction.addIntention({
   poolAddress: "bc1p...pool1",
+  poolUtxos: [],
   inputCoins: [
     {
       // Deposit 0.0005 BTC
@@ -135,6 +136,7 @@ transaction.addIntention({
 // Intention 2: Swap runes between pools
 transaction.addIntention({
   poolAddress: "bc1q...pool2",
+  poolUtxos: [],
   inputCoins: [
     {
       // Send 500 of rune A,
@@ -196,6 +198,7 @@ function WalletComponent() {
     // Add multiple intentions
     tx.addIntention({
       poolAddress: "pool1",
+      poolUtxos: [],
       inputCoins: [{
         coin: {
           id: "0:0",
@@ -216,6 +219,7 @@ function WalletComponent() {
 
     tx.addIntention({
       poolAddress: "pool2",
+      poolUtxos: [],
       inputCoins: [{
         coin: {
           id: "840000:3",
@@ -283,6 +287,7 @@ function MyComponent({ children }) {
 
     tx.addIntention({
       poolAddress: "bc1q...",
+      poolUtxos: [],
       inputCoins: [
         {
           coin: {
@@ -383,7 +388,6 @@ interface Intention {
   // Target pool address
   poolAddress: string;
   // the UTXOs obtained through the pool’s pre methods
-  // if not provided, will be fetched via the maestro API.
   poolUtxos?: [];
   // Coins being sent to the pool
   inputCoins: InputCoin[];

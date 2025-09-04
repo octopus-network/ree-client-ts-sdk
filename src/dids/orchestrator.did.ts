@@ -1,4 +1,3 @@
-// eslint-disable-next-line
 export const idlFactory = ({ IDL }: { IDL: any }) => {
   const Result = IDL.Variant({ Ok: IDL.Null, Err: IDL.Text });
   const TxOutputType = IDL.Variant({
@@ -312,4 +311,8 @@ export const idlFactory = ({ IDL }: { IDL: any }) => {
     update_bitcoin_subnet_certificate: IDL.Func([IDL.Vec(IDL.Nat8)], [], []),
     version: IDL.Func([], [IDL.Text], ["query"]),
   });
+};
+export const init = ({ IDL }: { IDL: any }) => {
+  const DeployArgs = IDL.Variant({ Upgrade: IDL.Null, Init: IDL.Null });
+  return [DeployArgs];
 };

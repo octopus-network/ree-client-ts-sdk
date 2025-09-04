@@ -3,7 +3,12 @@ import type { AddressType } from "../types/address";
 import type { Utxo } from "../types/utxo";
 import { RuneId, Edict, Runestone, none } from "runelib";
 import * as bitcoin from "bitcoinjs-lib";
-import { toBitcoinNetwork, getAddressType, hexToBytes } from "../utils";
+import {
+  toBitcoinNetwork,
+  getAddressType,
+  hexToBytes,
+  getUtxoProof,
+} from "../utils";
 import { UTXO_DUST, BITCOIN_ID } from "../constants";
 
 import type { ReeClient } from "../client";
@@ -825,6 +830,21 @@ export class Transaction {
       throw new Error("No itentions added");
     }
 
+    const initiatorUtxos = this.inputUtxos.filter(
+      (u) =>
+        u.address === this.config.paymentAddress ||
+        u.address === this.config.address
+    );
+
+    const initiatorUtxoProof = await getUtxoProof(
+      initiatorUtxos,
+      this.config.network
+    );
+
+    if (!initiatorUtxoProof) {
+      throw new Error("Failed to get utxo proof");
+    }
+
     return (
       this.client.orchestrator
         .invoke({
@@ -852,7 +872,7 @@ export class Transaction {
               })
             ),
           },
-          initiator_utxo_proof: [],
+          initiator_utxo_proof: initiatorUtxoProof,
           psbt_hex: signedPsbtHex,
         })
         // eslint-disable-next-line
