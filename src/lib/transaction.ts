@@ -1,5 +1,5 @@
 import type { TransactionConfig, Intention } from "../types/transaction";
-import type { AddressType } from "../types/address";
+import { AddressType } from "../types/address";
 import type { Utxo } from "../types/utxo";
 import { RuneId, Edict, Runestone, none } from "runelib";
 import * as bitcoin from "bitcoinjs-lib";
@@ -771,11 +771,11 @@ export class Transaction {
    * @example
    * ```typescript
    * // After adding intentions
-   * const psbt = await transaction.build();
+   * const { psbt, txid } = await transaction.build();
    * const signedPsbt = await wallet.signPsbt(psbt);
    * ```
    */
-  async build(): Promise<bitcoin.Psbt> {
+  async build(): Promise<{ psbt: bitcoin.Psbt; txid: string }> {
     const addressUtxos = await this.getInvolvedAddressUtxos();
 
     // Reset pool UTXOs if provided
@@ -807,7 +807,35 @@ export class Transaction {
       userOutputBtcAmount < 0 ? -userOutputBtcAmount : BigInt(0)
     );
 
-    return this.psbt;
+    //@ts-expect-error: todo
+    const unsignedTx = this.psbt.__CACHE.__TX;
+
+    const unsignedTxClone = unsignedTx.clone();
+
+    for (let i = 0; i < this.inputUtxos.length; i++) {
+      const inputUtxo = this.inputUtxos[i];
+
+      const inputAddress = inputUtxo.address;
+      if (
+        inputAddress !== this.config.paymentAddress ||
+        inputAddress !== this.config.address
+      )
+        continue;
+      const redeemScript = this.psbt.data.inputs[i].redeemScript;
+      const addressType = getAddressType(inputAddress);
+
+      if (redeemScript && addressType === AddressType.P2SH_P2WPKH) {
+        const finalScriptSig = bitcoin.script.compile([redeemScript]);
+        unsignedTxClone.setInputScript(i, finalScriptSig);
+      }
+    }
+
+    const txid = unsignedTxClone.getId();
+
+    return {
+      psbt: this.psbt,
+      txid,
+    };
   }
 
   /**

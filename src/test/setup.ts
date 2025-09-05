@@ -22,16 +22,30 @@ vi.mock("@bitcoinerlab/secp256k1", () => ({
 
 // Mock bitcoinjs-lib with working implementation
 vi.mock("bitcoinjs-lib", () => {
+  const mockTx = {
+    clone: vi.fn(() => ({
+      setInputScript: vi.fn(),
+      getId: vi.fn(() => "mock-txid"),
+    })),
+    setInputScript: vi.fn(),
+    getId: vi.fn(() => "mock-txid"),
+  };
+
   const mockPsbtInstance = {
     data: {
+      inputs: [],
       addInput: vi.fn().mockReturnThis(),
       addOutput: vi.fn().mockReturnThis(),
     },
+    addInput: vi.fn().mockReturnThis(),
     addOutput: vi.fn().mockReturnThis(),
     signInput: vi.fn().mockReturnThis(),
     finalizeAllInputs: vi.fn().mockReturnThis(),
     extractTransaction: vi.fn(() => ({ toHex: () => "mock-tx-hex" })),
     toHex: vi.fn(() => "mock-psbt-hex"),
+    __CACHE: {
+      __TX: mockTx,
+    },
   };
 
   return {
@@ -55,6 +69,9 @@ vi.mock("bitcoinjs-lib", () => {
       },
     },
     Psbt: vi.fn(() => mockPsbtInstance),
+    script: {
+      compile: vi.fn(() => Buffer.from("mock-script")),
+    },
   };
 });
 

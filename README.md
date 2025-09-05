@@ -99,7 +99,7 @@ transaction.addIntention({
 });
 
 // Build and execute
-const psbt = await transaction.build();
+const { psbt } = await transaction.build();
 const signedPsbt = await wallet.signPsbt(psbt);
 const result = await transaction.send(signedPsbt.toHex());
 ```
@@ -162,7 +162,7 @@ transaction.addIntention({
 });
 
 // Build and execute the multi-intention transaction
-const psbt = await transaction.build();
+const { psbt } = await transaction.build();
 const signedPsbt = await wallet.signPsbt(psbt);
 const result = await transaction.send(signedPsbt.toHex());
 ```
@@ -238,7 +238,7 @@ function WalletComponent() {
       nonce: BigInt(Date.now() + 1),
     });
 
-    const psbt = await tx.build();
+    const { psbt } = await tx.build();
     // Sign and send...
   };
 
@@ -302,7 +302,7 @@ function MyComponent({ children }) {
       nonce: depositOffer.nonce,
     });
 
-    const psbt = await tx.build();
+    const { psbt } = await tx.build();
 
     const signedPsbt = await signPsbt(psbt);
     const txid = await tx.send(signedPsbt.toHex());
@@ -378,7 +378,7 @@ Transaction builder for Bitcoin and Rune transactions with multi-intention suppo
 #### Methods
 
 - `addIntention(intention: Intention): void` - Add an intention to the transaction
-- `build(): Promise<bitcoin.Psbt>` - Build the PSBT with all intentions
+- `build(): Promise<{ psbt: bitcoin.Psbt, txid: string }>` - Build the PSBT with all intentions
 - `send(signedPsbtHex: string): Promise<any>` - Submit the signed transaction
 
 #### Intention Structure
