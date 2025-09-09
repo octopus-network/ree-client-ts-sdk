@@ -178,6 +178,7 @@ export class Transaction {
     }
 
     let totalAmount = BigInt(0);
+
     for (const utxo of btcUtxos) {
       if (utxo.runes.length && !isPoolAddress) {
         continue;
@@ -456,7 +457,7 @@ export class Transaction {
         // if coin is not output to pool, add it to outputCoins
         if (
           !outputCoinsClone.find((c) => c.coin.id === coin.id) &&
-          !poolAddresses.includes(from)
+          !(poolAddresses.includes(from) && from !== poolAddress)
         ) {
           outputCoinsClone.push({
             coin,
@@ -889,7 +890,7 @@ export class Transaction {
                 nonce,
               }) => ({
                 exchange_id: this.config.exchangeId,
-                input_coins: inputCoins,
+                input_coins: inputCoins.filter((c) => c.from !== poolAddress),
                 output_coins: outputCoins,
                 pool_address: poolAddress,
                 action,

@@ -408,4 +408,43 @@ describe("Transaction.build", () => {
       new Uint8Array(runestone.encipher())
     );
   });
+
+  it("self donate to rich pool", async () => {
+    const tx = new Transaction(makeConfig(), client);
+
+    const protocolFee = BigInt(100);
+
+    tx.addIntention({
+      poolAddress: richPoolAddress,
+      inputCoins: [
+        {
+          coin: { id: "0:0", value: protocolFee },
+          from: richPoolAddress,
+        },
+      ],
+      outputCoins: [],
+      action: "self_donate",
+      nonce: BigInt(1),
+    });
+
+    const addOutputSpy = vi.spyOn(tx as any, "addOutput");
+    const addScriptOutputSpy = vi.spyOn(tx as any, "addScriptOutput");
+    await tx.build();
+
+    const richPoolBtcAmount = BigInt(30_000);
+    const richPoolRuneAmount = BigInt(10_000);
+
+    expect(addOutputSpy).toHaveBeenCalledWith(
+      richPoolAddress,
+      richPoolBtcAmount
+    );
+
+    const runeId = new RuneId(840000, 3);
+
+    const edicts: Edict[] = [new Edict(runeId, richPoolRuneAmount, 1)];
+    const runestone = new Runestone(edicts, none(), none(), none());
+    expect(addScriptOutputSpy).toHaveBeenCalledWith(
+      new Uint8Array(runestone.encipher())
+    );
+  });
 });
