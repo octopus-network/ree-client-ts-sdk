@@ -781,8 +781,8 @@ export class Transaction {
 
     // Reset pool UTXOs if provided
     for (const it of this.intentions) {
-      const pu = (it as any).poolUtxos as Utxo[] | undefined;
-      if (!pu?.length) continue;
+      const pu = (it as any).poolUtxos as Utxo[];
+      if (!pu) continue;
       addressUtxos.btc[it.poolAddress] = pu;
       addressUtxos.rune[it.poolAddress] = {};
       const runeMap = addressUtxos.rune[it.poolAddress];
