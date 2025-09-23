@@ -29,7 +29,7 @@ export class Maestro {
         };
         data: RawBtcUtxo[];
       }>(
-        `/addresses/${address}/utxos?filter_dust=true&filter_dust_threshold=547&exclude_metaprotocols=${excludeMetaprotocols}&order=asc&count=100${
+        `/addresses/${address}/utxos?filter_dust=true&filter_dust_threshold=547&exclude_metaprotocols=${excludeMetaprotocols}&ignore_used_brc20=true&order=asc&count=100${
           cursor ? `&cursor=${cursor}` : ""
         }`
       )

@@ -47,3 +47,13 @@ export type Utxo = {
   address: string;
   scriptPk: string;
 };
+
+export type OutpointWithValue = {
+  outpoint: string;
+  value: bigint;
+  script_pubkey_hex: string;
+  maybe_rune: {
+    id: string;
+    value: bigint;
+  }[];
+};

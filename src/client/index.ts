@@ -5,8 +5,8 @@ import { Maestro } from "../lib/maestro";
 import type { Pool, PoolInfo } from "../types/pool";
 import { type ActorSubclass, Actor, HttpAgent } from "@dfinity/agent";
 import { Transaction } from "../lib/transaction";
-import type { Utxo } from "../types/utxo";
-import { bytesToHex, getScriptByAddress } from "../utils";
+import type { OutpointWithValue, Utxo } from "../types/utxo";
+import { bytesToHex, getAddressType, getScriptByAddress } from "../utils";
 
 import { gql, GraphQLClient } from "graphql-request";
 import type { RuneInfo } from "../types/rune";
@@ -104,6 +104,74 @@ export class ReeClient {
   }
 
   /**
+   * Get pending (zero-confirmation) Bitcoin UTXOs for a payment address
+   * These are UTXOs from Ree protocol transactions that have been broadcast but not yet confirmed
+   * Filters out UTXOs that contain runes to get pure Bitcoin UTXOs only
+   * @param paymentAddress - The Bitcoin payment address to check for pending UTXOs
+   * @returns Array of pending Bitcoin UTXOs without runes from Ree transactions
+   */
+  private async getPendingBtcUtxos(paymentAddress: string): Promise<Utxo[]> {
+    const res = (await this.orchestrator.get_zero_confirmed_utxos_of_address(
+      paymentAddress
+    )) as OutpointWithValue[];
+
+    const addressType = getAddressType(paymentAddress);
+
+    return res
+      .filter(({ maybe_rune }) => !maybe_rune.length)
+      .map(({ value, script_pubkey_hex, outpoint }) => {
+        const [txid, vout] = outpoint.split(":");
+        return {
+          txid,
+          vout: Number(vout),
+          satoshis: value.toString(),
+          scriptPk: script_pubkey_hex,
+          addressType,
+          address: paymentAddress,
+          runes: [],
+        };
+      });
+  }
+
+  /**
+   * Get pending (zero-confirmation) Rune UTXOs for an ordinals address
+   * These are UTXOs from Ree protocol transactions that have been broadcast but not yet confirmed
+   * Filters to include only UTXOs that contain runes
+   * @param address - The ordinals address to check for pending rune UTXOs
+   * @returns Array of pending UTXOs containing runes from Ree transactions
+   */
+  private async getPendingRuneUtxos(address: string): Promise<Utxo[]> {
+    const res = (await this.orchestrator.get_zero_confirmed_utxos_of_address(
+      address
+    )) as OutpointWithValue[];
+
+    const addressType = getAddressType(address);
+
+    return res
+      .filter(({ maybe_rune }) => maybe_rune.length)
+      .map(({ value, script_pubkey_hex, outpoint, maybe_rune }) => {
+        const [txid, vout] = outpoint.split(":");
+        const rune = maybe_rune[0];
+        return {
+          txid,
+          vout: Number(vout),
+          satoshis: value.toString(),
+          scriptPk: script_pubkey_hex,
+          addressType,
+          address,
+          runes: rune
+            ? [
+                {
+                  id: rune.id,
+                  amount: rune.value.toString(),
+                },
+              ]
+            : [],
+        };
+      });
+  }
+
+  /**
    * Get all Bitcoin UTXOs for the payment address
    * Handles pagination automatically to fetch all available UTXOs
    * @returns Array of Bitcoin UTXOs
@@ -114,6 +182,7 @@ export class ReeClient {
   ): Promise<Utxo[]> {
     let cursor = null;
     const data = [];
+    const pendingUtxos = await this.getPendingBtcUtxos(paymentAddress);
 
     // Paginate through all UTXOs
     do {
@@ -148,7 +217,7 @@ export class ReeClient {
       })
     );
 
-    return this.filterSpentUtxos(paymentAddress, btcUtxos);
+    return this.filterSpentUtxos(paymentAddress, btcUtxos.concat(pendingUtxos));
   }
 
   /**
@@ -159,6 +228,7 @@ export class ReeClient {
   async getRuneUtxos(address: string, runeId: string): Promise<Utxo[]> {
     let cursor = null;
     const data = [];
+    const pendingUtxos = await this.getPendingRuneUtxos(address);
 
     // Paginate through all rune UTXOs for this specific rune
     do {
@@ -194,7 +264,7 @@ export class ReeClient {
       };
     });
 
-    return this.filterSpentUtxos(address, runeUtxos);
+    return this.filterSpentUtxos(address, runeUtxos.concat(pendingUtxos));
   }
 
   /**
