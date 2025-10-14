@@ -24,6 +24,7 @@ export type OutputCoin = {
 };
 
 export type Intention = {
+  exchangeId?: string;
   inputCoins: InputCoin[];
   outputCoins: OutputCoin[];
   action: string;

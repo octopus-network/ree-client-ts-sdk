@@ -229,17 +229,17 @@
   integrity sha512-Vd/9EVDiu6PPJt9yAh6roZP6El1xHrdvIVGjyBsHR0RYwNHgL7FJPyIIW4fANJNG6FtyZfvlRPpFI4ZM/lubvw==
 
 "@dfinity/agent@^3.2.0":
-  version "3.2.3"
-  resolved "https://registry.yarnpkg.com/@dfinity/agent/-/agent-3.2.3.tgz#db03f5e50899589a9752b00e97790b42e6a1a108"
-  integrity sha512-OvGwILEjOR8bPi4TdwtJzZOBV5mrpHpg58zJKTPwwz7gcnAh3aB4vQt6U0QQ7+lduNcLySipV4CCuu7Ax/GLlw==
+  version "3.2.6"
+  resolved "https://registry.yarnpkg.com/@dfinity/agent/-/agent-3.2.6.tgz#67347ea813cc07cd2dd1a25b3c748a931e76a666"
+  integrity sha512-rJscQptoa43BxHgpeyy9qF6JbAXm4tn+IeNkUE9aMn60tfy1SGizMn6UQQOmw7jvl+LYDVA6w8ZA7c2br3cM+w==
   dependencies:
     "@dfinity/cbor" "^0.2.2"
     "@noble/curves" "^1.9.2"
 
 "@dfinity/candid@^3.2.0":
-  version "3.2.3"
-  resolved "https://registry.yarnpkg.com/@dfinity/candid/-/candid-3.2.3.tgz#74e76c70b08eda7158e35857f4bacb899db6151b"
-  integrity sha512-7GJlZyvYFfzltx6qEsuscucx9wFzSBH5k20pdUzZMK8xHu2JE4z/gHMzgj0ddwX8D0FsLTK1fKXqSpXbT7nUMA==
+  version "3.2.6"
+  resolved "https://registry.yarnpkg.com/@dfinity/candid/-/candid-3.2.6.tgz#9680a3057894e53ac1cef096325ce328874b937b"
+  integrity sha512-rh26bUluupegJNiDC6pJy0wyhkctPJSJ5ue4RxnodrbA6YMyQoj7m8Ic3Y81ah/fsSXOl9AIyyVh3kMqZb3lSw==
 
 "@dfinity/cbor@^0.2.2":
   version "0.2.2"
@@ -247,9 +247,9 @@
   integrity sha512-GPJpH73kDEKbUBdUjY80lz7cq9l0vm1h/7ppejPV6O0ZTqCLrYspssYvqjRmK4aNnJ/SKXsP0rg9LYX7zpegaA==
 
 "@dfinity/principal@^3.2.2":
-  version "3.2.3"
-  resolved "https://registry.yarnpkg.com/@dfinity/principal/-/principal-3.2.3.tgz#3ed83430e33f59a6472cd2b197343d37f1757dde"
-  integrity sha512-8wf7aFz1Ip3wumHOC7ampLl6S4x6+AIjSi4NZHofGOPog5a4ARWsBc6cAM2Akca6fVMFH0e6mGHov2lugoC9Dg==
+  version "3.2.6"
+  resolved "https://registry.yarnpkg.com/@dfinity/principal/-/principal-3.2.6.tgz#0e764f587e0679f717de2d0e26211d8ee8f69aac"
+  integrity sha512-jxEmMwZe2k/XC0DEW1i7CVJ/vPzIKT0zvXeQIBuvkfEcqWSVRiScHlURwnYStQAE1RVP8glDEs6ioeZgmEmazA==
   dependencies:
     "@noble/hashes" "^1.8.0"
 

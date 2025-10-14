@@ -887,9 +887,10 @@ export class Transaction {
                 poolAddress,
                 inputCoins,
                 outputCoins,
+                exchangeId,
                 nonce,
               }) => ({
-                exchange_id: this.config.exchangeId,
+                exchange_id: exchangeId ?? this.config.exchangeId,
                 input_coins: inputCoins.filter((c) => c.from !== poolAddress),
                 output_coins: outputCoins,
                 pool_address: poolAddress,
