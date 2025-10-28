@@ -441,9 +441,11 @@ export class ReeClient {
   async createTransaction({
     address,
     paymentAddress,
+    feeRate,
   }: {
     address: string;
     paymentAddress: string;
+    feeRate?: number;
   }) {
     // Create and return transaction builder
     return new Transaction(
@@ -452,6 +454,7 @@ export class ReeClient {
         exchangeId: this.config.exchangeId,
         address,
         paymentAddress,
+        feeRate,
       },
       this
     );

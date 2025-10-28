@@ -1,5 +1,5 @@
 import type { TransactionConfig, Intention } from "../types/transaction";
-import { AddressType } from "../types/address";
+import { AddressType, type AddressTypeName } from "../types/address";
 import type { Utxo } from "../types/utxo";
 import { RuneId, Edict, Runestone, none } from "runelib";
 import * as bitcoin from "bitcoinjs-lib";
@@ -12,6 +12,35 @@ import {
 import { UTXO_DUST, BITCOIN_ID } from "../constants";
 
 import type { ReeClient } from "../client";
+
+const INPUT_SIZE_VBYTES: Record<AddressTypeName, number> = {
+  P2PKH: 148,
+  P2SH_P2WPKH: 91,
+  P2WPKH: 68,
+  P2WSH: 140,
+  P2SH: 108,
+  P2TR: 58,
+  UNKNOWN: 110,
+};
+
+const OUTPUT_SIZE_VBYTES: Record<AddressTypeName, number> = {
+  P2PKH: 34,
+  P2SH_P2WPKH: 32,
+  P2WPKH: 31,
+  P2WSH: 43,
+  P2SH: 32,
+  P2TR: 43,
+  UNKNOWN: 34,
+};
+
+const SEGWIT_INPUT_TYPES = new Set<AddressTypeName>([
+  "P2WPKH",
+  "P2WSH",
+  "P2SH_P2WPKH",
+  "P2TR",
+]);
+
+const MANUAL_FEE_EXTRA_VBYTES = 2;
 
 /**
  * Transaction builder for Bitcoin and Rune transactions
@@ -211,10 +240,13 @@ export class Transaction {
   private async addBtcAndFees(btcUtxos: Utxo[], btcAmount: bigint) {
     const paymentAddress = this.config.paymentAddress;
     const additionalDustNeeded = this.additionalDustNeeded;
+    const paymentAddressType = getAddressType(paymentAddress);
 
     const userInputUtxoDusts = this.userInputUtxoDusts;
+    const manualFeeRate = this.config.feeRate;
 
-    this.outputAddressTypes.push(getAddressType(paymentAddress));
+    this.outputAddressTypes.push(paymentAddressType);
+    let changePlaceholderActive = true;
 
     let lastFee = BigInt(0);
     let currentFee = BigInt(0);
@@ -228,14 +260,23 @@ export class Transaction {
     do {
       lastFee = currentFee;
 
-      // Get fee estimate from orchestrator
-      const res = (await this.client.orchestrator.estimate_min_tx_fee({
-        input_types: this.inputAddressTypes,
-        pool_address: this.intentions.map((i) => i.poolAddress),
-        output_types: this.outputAddressTypes,
-      })) as { Ok: bigint };
+      if (manualFeeRate !== undefined) {
+        const estimatedVBytes = Transaction.estimateTxVirtualSize(
+          this.inputAddressTypes,
+          this.outputAddressTypes
+        );
+        currentFee = BigInt(Math.round(manualFeeRate * estimatedVBytes));
+      } else {
+        // Get fee estimate from orchestrator
+        const res = (await this.client.orchestrator.estimate_min_tx_fee({
+          input_types: this.inputAddressTypes,
+          pool_address: this.intentions.map((i) => i.poolAddress),
+          output_types: this.outputAddressTypes,
+        })) as { Ok: bigint };
 
-      currentFee = res.Ok;
+        currentFee = res.Ok;
+      }
+
       targetBtcAmount =
         btcAmount + currentFee + additionalDustNeeded - userInputUtxoDusts;
 
@@ -248,9 +289,9 @@ export class Transaction {
         }
 
         // Update input types for next fee calculation
-        this.inputAddressTypes = inputAddressTypesClone.concat([
-          ..._selectedUtxos.map(() => getAddressType(paymentAddress)),
-        ]);
+        this.inputAddressTypes = inputAddressTypesClone.concat(
+          _selectedUtxos.map(() => paymentAddressType)
+        );
 
         const totalBtcAmount = _selectedUtxos.reduce(
           (total, curr) => total + BigInt(curr.satoshis),
@@ -265,11 +306,20 @@ export class Transaction {
           )
         ) {
           this.outputAddressTypes.pop();
+          changePlaceholderActive = false;
         }
 
         selectedUtxos = _selectedUtxos;
       }
     } while (currentFee > lastFee && targetBtcAmount > 0);
+
+    // Restore input types so addInput re-adds each payment input once
+    this.inputAddressTypes = [...inputAddressTypesClone];
+
+    // Drop the placeholder change output type if it survived the loop
+    if (changePlaceholderActive) {
+      this.outputAddressTypes.pop();
+    }
 
     // Add selected UTXOs as inputs
     let totalBtcAmount = BigInt(0);
@@ -449,50 +499,86 @@ export class Transaction {
 
     const addressInputCoinAmounts: Record<string, Record<string, bigint>> = {};
     const addressOutputCoinAmounts: Record<string, Record<string, bigint>> = {};
+    const passthroughPoolUtxos = new Map<string, Utxo[]>();
+    const passthroughPools = new Set<string>();
 
-    this.intentions.forEach(({ poolAddress, inputCoins, outputCoins }) => {
-      const inputCoinsClone = [...inputCoins];
-      const outputCoinsClone = [...outputCoins];
-      inputCoinsClone.forEach(({ coin, from }) => {
-        // if coin is not output to pool, add it to outputCoins
+    this.intentions.forEach(
+      ({ poolAddress, inputCoins, outputCoins, poolUtxos }) => {
+        const inputCoinsClone = [...inputCoins];
+        const outputCoinsClone = [...outputCoins];
+
+        inputCoinsClone.forEach(({ coin, from }) => {
+          // if coin is not output to pool, add it to outputCoins
+          if (
+            !outputCoinsClone.find((c) => c.coin.id === coin.id) &&
+            !(poolAddresses.includes(from) && from !== poolAddress)
+          ) {
+            outputCoinsClone.push({
+              coin,
+              to: poolAddress,
+            });
+          }
+        });
+
+        outputCoinsClone.forEach(({ coin, to }) => {
+          // if coin is not input from pool, add it to inputCoins
+          if (
+            !inputCoinsClone.find((c) => c.coin.id === coin.id) &&
+            !poolAddresses.includes(to)
+          ) {
+            inputCoinsClone.push({
+              coin,
+              from: poolAddress,
+            });
+          }
+        });
+
         if (
-          !outputCoinsClone.find((c) => c.coin.id === coin.id) &&
-          !(poolAddresses.includes(from) && from !== poolAddress)
+          inputCoinsClone.length === 0 &&
+          outputCoinsClone.length === 0 &&
+          poolUtxos?.length
         ) {
-          outputCoinsClone.push({
-            coin,
-            to: poolAddress,
-          });
+          const existing = passthroughPoolUtxos.get(poolAddress);
+          passthroughPoolUtxos.set(
+            poolAddress,
+            existing ? existing.concat(poolUtxos) : [...poolUtxos]
+          );
+          passthroughPools.add(poolAddress);
+          return;
         }
-      });
 
-      outputCoinsClone.forEach(({ coin, to }) => {
-        // if coin is not input from pool, add it to inputCoins
-        if (
-          !inputCoinsClone.find((c) => c.coin.id === coin.id) &&
-          !poolAddresses.includes(to)
-        ) {
-          inputCoinsClone.push({
-            coin,
-            from: poolAddress,
-          });
-        }
-      });
+        inputCoinsClone.forEach(({ coin, from }) => {
+          addressInputCoinAmounts[from] ??= {};
+          addressInputCoinAmounts[from][coin.id] =
+            (addressInputCoinAmounts[from][coin.id] ?? BigInt(0)) +
+            BigInt(coin.value);
+        });
 
-      inputCoinsClone.forEach(({ coin, from }) => {
-        addressInputCoinAmounts[from] ??= {};
-        addressInputCoinAmounts[from][coin.id] =
-          (addressInputCoinAmounts[from][coin.id] ?? BigInt(0)) +
-          BigInt(coin.value);
-      });
+        outputCoinsClone.forEach(({ coin, to }) => {
+          addressOutputCoinAmounts[to] ??= {};
+          addressOutputCoinAmounts[to][coin.id] =
+            (addressOutputCoinAmounts[to][coin.id] ?? BigInt(0)) +
+            BigInt(coin.value);
+        });
+      }
+    );
 
-      outputCoinsClone.forEach(({ coin, to }) => {
-        addressOutputCoinAmounts[to] ??= {};
-        addressOutputCoinAmounts[to][coin.id] =
-          (addressOutputCoinAmounts[to][coin.id] ?? BigInt(0)) +
-          BigInt(coin.value);
+    for (const [address, utxos] of passthroughPoolUtxos.entries()) {
+      if (!utxos.length) {
+        continue;
+      }
+      addressOutputCoinAmounts[address] ??= {};
+      const coinAmounts = addressOutputCoinAmounts[address];
+      utxos.forEach((utxo) => {
+        this.addInput(utxo);
+        coinAmounts[BITCOIN_ID] =
+          (coinAmounts[BITCOIN_ID] ?? BigInt(0)) + BigInt(utxo.satoshis);
+        utxo.runes.forEach((rune) => {
+          coinAmounts[rune.id] =
+            (coinAmounts[rune.id] ?? BigInt(0)) + BigInt(rune.amount);
+        });
       });
-    });
+    }
 
     // Select UTXOs based on addressSendCoinAmounts and calculate change
     for (const [address, coinAmounts] of Object.entries(
@@ -584,7 +670,8 @@ export class Transaction {
       // Skip if this address already processed as input
       if (
         addressInputCoinAmounts[address] ||
-        !poolAddresses.includes(address)
+        !poolAddresses.includes(address) ||
+        passthroughPools.has(address)
       ) {
         continue;
       }
@@ -776,7 +863,11 @@ export class Transaction {
    * const signedPsbt = await wallet.signPsbt(psbt);
    * ```
    */
-  async build(): Promise<{ psbt: bitcoin.Psbt; txid: string }> {
+  async build(): Promise<{
+    psbt: bitcoin.Psbt;
+    txid: string;
+    fee: bigint;
+  }> {
     const addressUtxos = await this.getInvolvedAddressUtxos();
 
     // Reset pool UTXOs if provided
@@ -836,7 +927,99 @@ export class Transaction {
     return {
       psbt: this.psbt,
       txid,
+      fee: this.txFee,
     };
+  }
+
+  private static estimateTxVirtualSize(
+    inputTypes: AddressType[],
+    outputTypes: AddressType[]
+  ): number {
+    const inputCount = inputTypes.length;
+    const outputCount = outputTypes.length;
+
+    let totalVBytes =
+      4 + // version
+      4 + // locktime
+      Transaction.varIntSize(inputCount) +
+      Transaction.varIntSize(outputCount);
+
+    let hasWitness = false;
+
+    for (const addressType of inputTypes) {
+      const parsed = Transaction.parseAddressType(addressType);
+      if (parsed.key === "OpReturn") {
+        continue;
+      }
+
+      const size =
+        INPUT_SIZE_VBYTES[parsed.key as AddressTypeName] ??
+        INPUT_SIZE_VBYTES.UNKNOWN;
+      totalVBytes += size;
+
+      if (SEGWIT_INPUT_TYPES.has(parsed.key as AddressTypeName)) {
+        hasWitness = true;
+      }
+    }
+
+    for (const addressType of outputTypes) {
+      const parsed = Transaction.parseAddressType(addressType);
+      if (parsed.key === "OpReturn") {
+        const dataLength = Math.max(0, parsed.opReturnLength ?? 0);
+        totalVBytes += 11 + dataLength;
+        continue;
+      }
+
+      const size =
+        OUTPUT_SIZE_VBYTES[parsed.key as AddressTypeName] ??
+        OUTPUT_SIZE_VBYTES.UNKNOWN;
+      totalVBytes += size;
+    }
+
+    if (hasWitness) {
+      // Segwit marker + flag add 0.5 vbytes; round up to keep estimate conservative
+      totalVBytes += 1;
+    }
+
+    return totalVBytes + MANUAL_FEE_EXTRA_VBYTES;
+  }
+
+  private static parseAddressType(addressType: AddressType): {
+    key: AddressTypeName | "OpReturn";
+    opReturnLength?: number;
+  } {
+    if ("OpReturn" in addressType) {
+      const lengthValue =
+        addressType.OpReturn !== undefined ? Number(addressType.OpReturn) : 0;
+      return {
+        key: "OpReturn",
+        opReturnLength: Number.isFinite(lengthValue) ? lengthValue : 0,
+      };
+    }
+
+    const knownKeys: AddressTypeName[] = [
+      "P2PKH",
+      "P2SH_P2WPKH",
+      "P2WPKH",
+      "P2WSH",
+      "P2SH",
+      "P2TR",
+    ];
+
+    for (const key of knownKeys) {
+      if (key in addressType) {
+        return { key };
+      }
+    }
+
+    return { key: "UNKNOWN" };
+  }
+
+  private static varIntSize(value: number): number {
+    if (value < 0xfd) return 1;
+    if (value <= 0xffff) return 3;
+    if (value <= 0xffffffff) return 5;
+    return 9;
   }
 
   /**

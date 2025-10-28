@@ -13,3 +13,12 @@ export type AddressType =
   | {
       OpReturn: bigint;
     };
+
+export type AddressTypeName =
+  | "P2PKH"
+  | "P2SH_P2WPKH"
+  | "P2WPKH"
+  | "P2WSH"
+  | "P2SH"
+  | "P2TR"
+  | "UNKNOWN";

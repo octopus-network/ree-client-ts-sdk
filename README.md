@@ -70,6 +70,7 @@ const poolInfo = await client.getPoolInfo("pool-address");
 const transaction = await client.createTransaction({
   address: "bc1p...", // Bitcoin address for runes
   paymentAddress: "bc1q...", // Payment address for BTC
+  // feeRate: BigInt(25), // Optional manual fee rate in sat/vbyte
 });
 
 // Add a single intention (e.g., swap BTC for runes)
@@ -111,6 +112,7 @@ const result = await transaction.send(signedPsbt.toHex());
 const transaction = await client.createTransaction({
   address: "bc1p...",
   paymentAddress: "bc1q...",
+  // feeRate: BigInt(25),
 });
 
 // Add multiple intentions in a single transaction
@@ -193,7 +195,9 @@ function WalletComponent() {
 
   const executeComplexTransaction = async () => {
     // Create transaction with multiple pools
-    const tx = await createTransaction();
+    const tx = await createTransaction({
+      // feeRate: BigInt(25), // Optional manual fee rate override
+    });
 
     // Add multiple intentions
     tx.addIntention({
@@ -283,7 +287,9 @@ function MyComponent({ children }) {
       value: depositBtcAmount,
     });
 
-    const tx = await createTransaction();
+    const tx = await createTransaction({
+      // feeRate: BigInt(25),
+    });
 
     tx.addIntention({
       poolAddress: "bc1q...",
@@ -369,7 +375,7 @@ new ReeClient(config: Config)
 
 ##### Transaction Methods
 
-- `createTransaction(): Promise<Transaction>` - Create a transaction
+- `createTransaction(params?: { feeRate?: bigint }): Promise<Transaction>` - Create a transaction with optional manual fee rate
 
 ### Transaction
 

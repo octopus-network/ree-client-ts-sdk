@@ -4,6 +4,7 @@ import { Transaction } from "./transaction";
 import { Network } from "../types/network";
 import type { TransactionConfig, Intention } from "../types/transaction";
 import type { Utxo } from "../types/utxo";
+import type { AddressType } from "../types/address";
 import { BITCOIN_ID, UTXO_DUST } from "../constants";
 import { RuneId, Edict, Runestone, none } from "runelib";
 
@@ -148,12 +149,15 @@ describe("Transaction.build", () => {
     };
   });
 
-  function makeConfig(): TransactionConfig {
+  function makeConfig(
+    overrides: Partial<TransactionConfig> = {}
+  ): TransactionConfig {
     return {
       network: Network.Testnet,
       exchangeId: "dummy-exchange",
       address: userAddress,
       paymentAddress,
+      ...overrides,
     };
   }
 
@@ -189,6 +193,45 @@ describe("Transaction.build", () => {
 
     // Should add change output since 120000 - 10000 - 1000 = 109000 > DUST
     expect(addOutputSpy).toHaveBeenCalledWith(paymentAddress, BigInt(109000));
+  });
+
+  it("uses manual fee rate when provided", async () => {
+    const manualFeeRate = 25;
+    const tx = new Transaction(makeConfig({ feeRate: manualFeeRate }), client);
+
+    const depositAmount = BigInt(10_000);
+    const intention: Intention = {
+      poolAddress,
+      inputCoins: [
+        {
+          coin: { id: BITCOIN_ID, value: depositAmount },
+          from: paymentAddress,
+        },
+      ],
+      outputCoins: [],
+      action: "deposit",
+      nonce: BigInt(2),
+    };
+
+    tx.addIntention(intention);
+
+    const { fee } = await tx.build();
+
+    expect(client.orchestrator.estimate_min_tx_fee).not.toHaveBeenCalled();
+
+    const estimateTxVirtualSize = (Transaction as any)
+      .estimateTxVirtualSize as (
+      inputTypes: AddressType[],
+      outputTypes: AddressType[]
+    ) => number;
+
+    const inputTypes = (tx as any).inputAddressTypes as AddressType[];
+    const outputTypes = (tx as any).outputAddressTypes as AddressType[];
+
+    const expectedFee =
+      manualFeeRate * estimateTxVirtualSize(inputTypes, outputTypes);
+
+    expect(fee).toBe(BigInt(expectedFee));
   });
 
   it("withdraw btc from pool", async () => {
