@@ -71,7 +71,12 @@ const transaction = await client.createTransaction({
   address: "bc1p...", // Bitcoin address for runes
   paymentAddress: "bc1q...", // Payment address for BTC
   // feeRate: 25, // Optional manual fee rate in sat/vbyte
+  // mergeSelfRuneBtcOutputs: true, // Optional: reuse BTC output when your rune address also receives sats
 });
+
+// By default, runes delivered back to your own rune address are kept on a separate
+// dust output to avoid mixing with BTC change. Set `mergeSelfRuneBtcOutputs` to true
+// if you prefer to consolidate the runes and sats into the same output.
 
 // Add a single intention (e.g., swap BTC for runes)
 transaction.addIntention({
@@ -454,6 +459,7 @@ import {
   useRuneInfo,
   usePoolList,
   usePoolInfo,
+  useRecommendedFeeRate,
 } from "@ree-network/ts-sdk";
 
 function TradingDashboard() {
@@ -462,6 +468,11 @@ function TradingDashboard() {
   const { balance: runeBalance } = useRuneBalance("840000:3");
   const { utxos: btcUtxos } = useBtcUtxos();
   const { utxos: runeUtxos } = useRuneUtxos("840000:3");
+  const {
+    feeRate,
+    loading: feeRateLoading,
+    refetch: refreshFeeRate,
+  } = useRecommendedFeeRate();
 
   const [runes, setRunes] = useState([]);
 
@@ -482,6 +493,12 @@ function TradingDashboard() {
       <h2>Balances</h2>
       <div>BTC: {btcBalance} BTC</div>
       <div>Rune: {runeBalance}</div>
+      <div>
+        Recommended Fee Rate:{" "}
+        {feeRateLoading
+          ? "Loading..."
+          : `${feeRate?.min?.toString()} - ${feeRate?.max?.toString()} sat/vB`}
+      </div>
 
       <h2>Search Runes</h2>
       <button onClick={handleSearch}>Search DOG</button>
@@ -512,6 +529,10 @@ function TradingDashboard() {
 
 - `usePoolList(options?)` - Get all available pools
 - `usePoolInfo(poolAddress?, options?)` - Get specific pool information
+
+**Fee Rate Hooks:**
+
+- `useRecommendedFeeRate(options?)` - Retrieve recommended fee rate range
 
 #### Hook Usage Examples
 

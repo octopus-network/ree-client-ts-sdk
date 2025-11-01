@@ -68,7 +68,7 @@ export function ReeProvider({ children, config }: ReeProviderProps) {
   }, [config]);
 
   const createTransaction = useCallback(
-    async (params?: { feeRate?: number }) => {
+    async (params?: { feeRate?: number; mergeSelfRuneBtcOutputs?: boolean }) => {
       if (!client) throw new Error("Client not available");
       if (!wallet.address || !wallet.paymentAddress) {
         throw new Error("Wallet not connected");
@@ -77,6 +77,7 @@ export function ReeProvider({ children, config }: ReeProviderProps) {
         address: wallet.address,
         paymentAddress: wallet.paymentAddress,
         feeRate: params?.feeRate,
+        mergeSelfRuneBtcOutputs: params?.mergeSelfRuneBtcOutputs,
       });
     },
     [client, wallet]

@@ -8,4 +8,5 @@ export {
   useRuneInfo,
   usePoolList,
   usePoolInfo,
+  useRecommendedFeeRate,
 } from "./hooks";

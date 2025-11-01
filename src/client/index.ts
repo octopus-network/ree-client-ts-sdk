@@ -442,10 +442,12 @@ export class ReeClient {
     address,
     paymentAddress,
     feeRate,
+    mergeSelfRuneBtcOutputs,
   }: {
     address: string;
     paymentAddress: string;
     feeRate?: number;
+    mergeSelfRuneBtcOutputs?: boolean;
   }) {
     // Create and return transaction builder
     return new Transaction(
@@ -455,8 +457,24 @@ export class ReeClient {
         address,
         paymentAddress,
         feeRate,
+        mergeSelfRuneBtcOutputs,
       },
       this
     );
+  }
+
+  async getRecommendedFeeRate() {
+    const res = (await this.orchestrator.get_status()) as {
+      mempool_tx_fee_rate: {
+        low: bigint;
+        high: bigint;
+        medium: bigint;
+      };
+    };
+
+    return {
+      min: Number(res.mempool_tx_fee_rate.medium),
+      max: Number(res.mempool_tx_fee_rate.medium) * 3,
+    };
   }
 }

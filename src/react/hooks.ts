@@ -406,3 +406,56 @@ export function usePoolInfo(poolAddress?: string) {
     refetch: fetchPoolInfo,
   };
 }
+
+/**
+ * Hook to retrieve the recommended fee rate range
+ * @returns Object with minimum/maximum fee rates, loading state, error, and refetch function
+ */
+export function useRecommendedFeeRate(options: UseBalanceOptions = {}) {
+  const { refreshInterval = 0, autoRefresh = true } = options;
+  const { client } = useRee();
+  const [feeRate, setFeeRate] = useState<{ min: number; max: number } | null>(
+    null
+  );
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchFeeRate = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const recommendedFeeRate = await client.getRecommendedFeeRate();
+      setFeeRate(recommendedFeeRate);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to fetch recommended fee rate"
+      );
+      setFeeRate(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [client]);
+
+  useEffect(() => {
+    if (autoRefresh) {
+      fetchFeeRate();
+    }
+  }, [autoRefresh, fetchFeeRate]);
+
+  useEffect(() => {
+    if (refreshInterval > 0) {
+      const interval = setInterval(fetchFeeRate, refreshInterval);
+      return () => clearInterval(interval);
+    }
+  }, [refreshInterval, fetchFeeRate]);
+
+  return {
+    feeRate,
+    loading,
+    error,
+    refetch: fetchFeeRate,
+  };
+}

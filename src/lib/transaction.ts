@@ -504,13 +504,15 @@ export class Transaction {
 
     this.intentions.forEach(
       ({ poolAddress, inputCoins, outputCoins, poolUtxos }) => {
-        const inputCoinsClone = [...inputCoins];
+        const inputCoinsClone = [
+          ...inputCoins.filter(({ from }) => !poolAddresses.includes(from)),
+        ];
         const outputCoinsClone = [...outputCoins];
 
         inputCoinsClone.forEach(({ coin, from }) => {
           // if coin is not output to pool, add it to outputCoins
           if (
-            !outputCoinsClone.find((c) => c.coin.id === coin.id) &&
+            !outputCoins.find((c) => c.coin.id === coin.id) &&
             !(poolAddresses.includes(from) && from !== poolAddress)
           ) {
             outputCoinsClone.push({
@@ -520,12 +522,9 @@ export class Transaction {
           }
         });
 
-        outputCoinsClone.forEach(({ coin, to }) => {
+        outputCoinsClone.forEach(({ coin }) => {
           // if coin is not input from pool, add it to inputCoins
-          if (
-            !inputCoinsClone.find((c) => c.coin.id === coin.id) &&
-            !poolAddresses.includes(to)
-          ) {
+          if (!inputCoins.find((c) => c.coin.id === coin.id)) {
             inputCoinsClone.push({
               coin,
               from: poolAddress,
@@ -611,6 +610,7 @@ export class Transaction {
 
           // Calculate change
           const changeAmount = totalInputAmount - requiredAmount;
+
           if (changeAmount > BigInt(0)) {
             addressOutputCoinAmounts[address] ??= {};
             addressOutputCoinAmounts[address][coinId] =
@@ -650,7 +650,12 @@ export class Transaction {
           // Calculate rune change
           const changeAmount = totalInputRuneAmount - requiredAmount;
 
-          if (changeAmount > BigInt(0)) {
+          if (poolAddresses.includes(address)) {
+            addressOutputCoinAmounts[address] ??= {};
+            addressOutputCoinAmounts[address][coinId] =
+              (addressOutputCoinAmounts[address][coinId] ?? BigInt(0)) -
+              requiredAmount;
+          } else if (changeAmount > BigInt(0)) {
             addressOutputCoinAmounts[address] ??= {};
             addressOutputCoinAmounts[address][coinId] =
               (addressOutputCoinAmounts[address][coinId] ?? BigInt(0)) +
@@ -744,6 +749,9 @@ export class Transaction {
   private addOutputs(
     addressReceiveCoinAmounts: Record<string, Record<string, bigint>>
   ) {
+    const mergeSelfRuneBtcOutputs =
+      this.config.mergeSelfRuneBtcOutputs === true;
+
     // Collect all rune IDs that need to be transferred
     const runeIdSet = new Set<string>();
     for (const [, coinAmounts] of Object.entries(addressReceiveCoinAmounts)) {
@@ -790,15 +798,16 @@ export class Transaction {
       targetAddresses.forEach((address) => {
         const btcAmount =
           addressReceiveCoinAmounts[address]?.[BITCOIN_ID] ?? BigInt(0);
-        const outputAmount =
-          btcAmount > BigInt(0) && address !== this.config.address
-            ? btcAmount
-            : UTXO_DUST;
+        const isSelfAddress = address === this.config.address;
+        const shouldUseBtcAmount =
+          btcAmount > BigInt(0) &&
+          (!isSelfAddress || mergeSelfRuneBtcOutputs);
+        const outputAmount = shouldUseBtcAmount ? btcAmount : UTXO_DUST;
 
         this.addOutput(address, outputAmount);
 
         // If we used the BTC amount, remove it from remaining amounts
-        if (btcAmount > BigInt(0) && address !== this.config.address) {
+        if (shouldUseBtcAmount) {
           delete addressReceiveCoinAmounts[address][BITCOIN_ID];
         } else {
           // Track additional dust needed for fee calculation

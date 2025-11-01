@@ -8,6 +8,11 @@ export interface TransactionConfig {
   paymentAddress: string;
   /** Optional manual fee rate in satoshis per virtual byte */
   feeRate?: number;
+  /**
+   * When true, rune outputs to the local rune address reuse existing BTC value
+   * instead of emitting a separate dust output. Defaults to false.
+   */
+  mergeSelfRuneBtcOutputs?: boolean;
 }
 
 export type CoinBalance = {
