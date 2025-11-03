@@ -6,6 +6,7 @@ export interface TransactionConfig {
   exchangeId: string;
   address: string;
   paymentAddress: string;
+  clientInfo?: string;
   /** Optional manual fee rate in satoshis per virtual byte */
   feeRate?: number;
   /**
