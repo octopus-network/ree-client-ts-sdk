@@ -1096,7 +1096,7 @@ export class Transaction {
           },
           initiator_utxo_proof: initiatorUtxoProof,
           psbt_hex: signedPsbtHex,
-          client_info: this.config.clientInfo ?? ""
+          client_info: [this.config.clientInfo ?? ""]
         })
         // eslint-disable-next-line
         .then((data: any) => {
