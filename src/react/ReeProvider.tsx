@@ -21,7 +21,10 @@ interface ReeContextValue {
   paymentAddress: string;
   updateWallet: (wallet: { address?: string; paymentAddress?: string }) => void;
 
-  createTransaction: (params?: { feeRate?: number }) => Promise<Transaction>;
+  createTransaction: (params?: {
+    feeRate?: number;
+    mergeSelfRuneBtcOutputs?: boolean;
+  }) => Promise<Transaction>;
 }
 
 const ReeContext = createContext<ReeContextValue | null>(null);
@@ -68,7 +71,10 @@ export function ReeProvider({ children, config }: ReeProviderProps) {
   }, [config]);
 
   const createTransaction = useCallback(
-    async (params?: { feeRate?: number; mergeSelfRuneBtcOutputs?: boolean }) => {
+    async (params?: {
+      feeRate?: number;
+      mergeSelfRuneBtcOutputs?: boolean;
+    }) => {
       if (!client) throw new Error("Client not available");
       if (!wallet.address || !wallet.paymentAddress) {
         throw new Error("Wallet not connected");

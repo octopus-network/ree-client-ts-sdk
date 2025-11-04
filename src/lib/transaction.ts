@@ -490,7 +490,10 @@ export class Transaction {
   private addInputsAndCalculateOutputs(addressUtxos: {
     btc: Record<string, Utxo[]>;
     rune: Record<string, Record<string, Utxo[]>>;
-  }) {
+  }): {
+    addressOutputCoinAmounts: Record<string, Record<string, bigint>>;
+    paymentBtcRequired: bigint;
+  } {
     if (!this.intentions.length) {
       throw new Error("No intentions added");
     }
@@ -499,6 +502,7 @@ export class Transaction {
 
     const addressInputCoinAmounts: Record<string, Record<string, bigint>> = {};
     const addressOutputCoinAmounts: Record<string, Record<string, bigint>> = {};
+    let paymentBtcRequired = BigInt(0);
     const passthroughPoolUtxos = new Map<string, Utxo[]>();
     const passthroughPools = new Set<string>();
 
@@ -586,11 +590,7 @@ export class Transaction {
       for (const [coinId, requiredAmount] of Object.entries(coinAmounts)) {
         if (coinId === BITCOIN_ID) {
           if (address === this.config.paymentAddress) {
-            addressOutputCoinAmounts[address] ??= {};
-            addressOutputCoinAmounts[address][coinId] =
-              (addressOutputCoinAmounts[address][coinId] ?? BigInt(0)) -
-              requiredAmount;
-
+            paymentBtcRequired += requiredAmount;
             continue;
           }
 
@@ -647,14 +647,29 @@ export class Transaction {
             return total + BigInt(runeBalance?.amount ?? 0);
           }, BigInt(0));
 
+          const totalRuneUtxoSats = selectedUtxos.reduce(
+            (total, utxo) => total + BigInt(utxo.satoshis),
+            BigInt(0)
+          );
+
           // Calculate rune change
           const changeAmount = totalInputRuneAmount - requiredAmount;
 
           if (poolAddresses.includes(address)) {
             addressOutputCoinAmounts[address] ??= {};
-            addressOutputCoinAmounts[address][coinId] =
-              (addressOutputCoinAmounts[address][coinId] ?? BigInt(0)) -
-              requiredAmount;
+            const poolCoinAmounts = addressOutputCoinAmounts[address];
+            const poolNeedsBtc =
+              (addressInputCoinAmounts[address]?.[BITCOIN_ID] ?? BigInt(0)) >
+              BigInt(0);
+
+            if (totalRuneUtxoSats > BigInt(0) && !poolNeedsBtc) {
+              poolCoinAmounts[BITCOIN_ID] =
+                (poolCoinAmounts[BITCOIN_ID] ?? BigInt(0)) + totalRuneUtxoSats;
+            }
+            if (changeAmount > BigInt(0)) {
+              poolCoinAmounts[coinId] =
+                (poolCoinAmounts[coinId] ?? BigInt(0)) + changeAmount;
+            }
           } else if (changeAmount > BigInt(0)) {
             addressOutputCoinAmounts[address] ??= {};
             addressOutputCoinAmounts[address][coinId] =
@@ -726,7 +741,7 @@ export class Transaction {
       }
     }
 
-    return addressOutputCoinAmounts;
+    return { addressOutputCoinAmounts, paymentBtcRequired };
   }
 
   /**
@@ -800,8 +815,7 @@ export class Transaction {
           addressReceiveCoinAmounts[address]?.[BITCOIN_ID] ?? BigInt(0);
         const isSelfAddress = address === this.config.address;
         const shouldUseBtcAmount =
-          btcAmount > BigInt(0) &&
-          (!isSelfAddress || mergeSelfRuneBtcOutputs);
+          btcAmount > BigInt(0) && (!isSelfAddress || mergeSelfRuneBtcOutputs);
         const outputAmount = shouldUseBtcAmount ? btcAmount : UTXO_DUST;
 
         this.addOutput(address, outputAmount);
@@ -892,7 +906,7 @@ export class Transaction {
     }
 
     // Get output coin amounts of addresses
-    const addressOutputCoinAmounts =
+    const { addressOutputCoinAmounts, paymentBtcRequired } =
       this.addInputsAndCalculateOutputs(addressUtxos);
 
     // Add outputs by the output coin amounts
@@ -900,13 +914,8 @@ export class Transaction {
 
     const paymentAddress = this.config.paymentAddress;
     const userBtcUtxos = addressUtxos.btc[paymentAddress] ?? [];
-    const userOutputBtcAmount =
-      addressOutputCoinAmounts[paymentAddress]?.[BITCOIN_ID] ?? BigInt(0);
 
-    await this.addBtcAndFees(
-      userBtcUtxos,
-      userOutputBtcAmount < 0 ? -userOutputBtcAmount : BigInt(0)
-    );
+    await this.addBtcAndFees(userBtcUtxos, paymentBtcRequired);
 
     //@ts-expect-error: todo
     const unsignedTx = this.psbt.__CACHE.__TX;
@@ -1096,7 +1105,7 @@ export class Transaction {
           },
           initiator_utxo_proof: initiatorUtxoProof,
           psbt_hex: signedPsbtHex,
-          client_info: [this.config.clientInfo ?? ""]
+          client_info: [this.config.clientInfo ?? ""],
         })
         // eslint-disable-next-line
         .then((data: any) => {
