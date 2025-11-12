@@ -624,6 +624,11 @@ export class Transaction {
             // If pool address, add rune amounts to output coin amounts
             if (poolAddresses.includes(address)) {
               utxo.runes.forEach((rune) => {
+                const runeDemand =
+                  addressInputCoinAmounts[address]?.[rune.id] ?? BigInt(0);
+                if (runeDemand > BigInt(0)) {
+                  return;
+                }
                 addressOutputCoinAmounts[address] ??= {};
                 addressOutputCoinAmounts[address][rune.id] =
                   (addressOutputCoinAmounts[address][rune.id] ?? BigInt(0)) +
