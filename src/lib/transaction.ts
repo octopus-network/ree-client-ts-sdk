@@ -821,12 +821,19 @@ export class Transaction {
         const isSelfAddress = address === this.config.address;
         const shouldUseBtcAmount =
           btcAmount > BigInt(0) && (!isSelfAddress || mergeSelfRuneBtcOutputs);
-        const outputAmount = shouldUseBtcAmount ? btcAmount : UTXO_DUST;
+        const outputAmount = shouldUseBtcAmount
+          ? btcAmount > UTXO_DUST
+            ? btcAmount
+            : UTXO_DUST
+          : UTXO_DUST;
 
         this.addOutput(address, outputAmount);
 
         // If we used the BTC amount, remove it from remaining amounts
         if (shouldUseBtcAmount) {
+          if (btcAmount < UTXO_DUST) {
+            this.additionalDustNeeded += UTXO_DUST - btcAmount;
+          }
           delete addressReceiveCoinAmounts[address][BITCOIN_ID];
         } else {
           // Track additional dust needed for fee calculation

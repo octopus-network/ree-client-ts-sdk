@@ -186,7 +186,7 @@ export class ReeClient {
 
     // Paginate through all UTXOs
     do {
-      const res = await this.maestro.utxosByAddress(
+      const res = await this.maestro.utxosByAddressMempoolAware(
         paymentAddress,
         cursor,
         excludeMetaprotocols

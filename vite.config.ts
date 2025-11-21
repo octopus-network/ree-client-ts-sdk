@@ -8,19 +8,30 @@ export default defineConfig({
   },
   build: {
     lib: {
-      entry: resolve(__dirname, "src/index.ts"),
+      entry: {
+        index: resolve(__dirname, "src/index.ts"),
+        react: resolve(__dirname, "src/react.ts"),
+      },
       name: "ree-sdk",
-      fileName: (format) => `ree-sdk.${format}.js`,
+      fileName: (format, entryName) => `${entryName}.${format}.js`,
       formats: ["es", "cjs"],
     },
     rollupOptions: {
-      external: ["react", "react-dom", "react/jsx-runtime"],
+      external: [
+        "react", 
+        "react-dom", 
+        "react/jsx-runtime",
+        "react/jsx-dev-runtime"
+      ],
       output: [
         {
           format: "es",
           exports: "named",
           globals: {
             "bitcoinjs-lib": "bitcoin",
+            "react": "React",
+            "react-dom": "ReactDOM",
+            "react/jsx-runtime": "jsxRuntime"
           },
           interop: "auto",
           manualChunks: undefined,
@@ -28,6 +39,11 @@ export default defineConfig({
         {
           format: "cjs",
           exports: "named",
+          globals: {
+            "react": "React",
+            "react-dom": "ReactDOM", 
+            "react/jsx-runtime": "jsxRuntime"
+          },
           interop: "auto",
         },
       ],

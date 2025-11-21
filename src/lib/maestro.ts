@@ -38,6 +38,29 @@ export class Maestro {
     return res;
   }
 
+  async utxosByAddressMempoolAware(
+    address: string,
+    cursor?: string | null,
+    excludeMetaprotocols = true
+  ) {
+    const res = await this.axios
+      .get<{
+        next_cursor: string | null;
+        last_updated: {
+          block_hash: string;
+          block_height: bigint;
+        };
+        data: RawBtcUtxo[];
+      }>(
+        `/mempool/addresses/${address}/utxos?filter_dust=true&exclude_metaprotocols=${excludeMetaprotocols}&filter_dust_threshold=547&order=asc&count=100${
+          cursor ? `&cursor=${cursor}` : ""
+        }`
+      )
+      .then((res) => res.data);
+
+    return res;
+  }
+
   async inscriptionIdsByCollectionSymbol(
     collection: string,
     cursor?: string | null
