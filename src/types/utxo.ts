@@ -46,6 +46,7 @@ export type Utxo = {
   }[];
   address: string;
   scriptPk: string;
+  pubkey?: string;
 };
 
 export type OutpointWithValue = {

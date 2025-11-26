@@ -89,14 +89,39 @@ export class Transaction {
 
     const { address } = utxo;
 
-    this.psbt.data.addInput({
-      hash: utxo.txid,
-      index: utxo.vout,
-      witnessUtxo: {
-        value: BigInt(utxo.satoshis),
-        script: hexToBytes(utxo.scriptPk),
-      },
-    });
+    const addressType = getAddressType(address);
+
+    if (addressType === AddressType.P2TR) {
+      let pubkey = utxo.pubkey;
+      if (!pubkey) {
+        if (utxo.address === this.config.address && this.config.publicKey) {
+          pubkey = this.config.publicKey;
+        } else {
+          throw new Error("No pubkey found in P2TR UTXO");
+        }
+      }
+
+      const xOnlyPubkey = pubkey.length === 66 ? pubkey.slice(2) : pubkey;
+
+      this.psbt.data.addInput({
+        hash: utxo.txid,
+        index: utxo.vout,
+        witnessUtxo: {
+          value: BigInt(utxo.satoshis),
+          script: hexToBytes(utxo.scriptPk),
+        },
+        tapInternalKey: hexToBytes(xOnlyPubkey),
+      });
+    } else {
+      this.psbt.data.addInput({
+        hash: utxo.txid,
+        index: utxo.vout,
+        witnessUtxo: {
+          value: BigInt(utxo.satoshis),
+          script: hexToBytes(utxo.scriptPk),
+        },
+      });
+    }
 
     this.inputAddressTypes.push(getAddressType(address));
     this.inputUtxos.push(utxo);
@@ -268,11 +293,16 @@ export class Transaction {
         currentFee = BigInt(Math.round(manualFeeRate * estimatedVBytes));
       } else {
         // Get fee estimate from orchestrator
-        const res = (await this.client.orchestrator.estimate_min_tx_fee({
-          input_types: this.inputAddressTypes,
-          pool_address: this.intentions.map((i) => i.poolAddress),
-          output_types: this.outputAddressTypes,
-        })) as { Ok: bigint };
+        const res = (await this.client.orchestrator
+          .estimate_min_tx_fee({
+            input_types: this.inputAddressTypes,
+            pool_address: this.intentions.map((i) => i.poolAddress),
+            output_types: this.outputAddressTypes,
+          })
+          .catch((err) => {
+            console.error("estimate_min_tx_fee failed:", err);
+            throw err;
+          })) as { Ok: bigint };
 
         currentFee = res.Ok;
       }

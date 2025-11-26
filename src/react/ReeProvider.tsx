@@ -19,11 +19,18 @@ interface ReeContextValue {
   exchange: ActorSubclass;
   address: string;
   paymentAddress: string;
-  updateWallet: (wallet: { address?: string; paymentAddress?: string }) => void;
+  publicKey: string;
+  updateWallet: (wallet: {
+    address?: string;
+    paymentAddress?: string;
+    publicKey?: string;
+    paymentPublicKey?: string;
+  }) => void;
 
   createTransaction: (params?: {
     feeRate?: number;
     mergeSelfRuneBtcOutputs?: boolean;
+    clientInfo?: string;
   }) => Promise<Transaction>;
 }
 
@@ -74,16 +81,20 @@ export function ReeProvider({ children, config }: ReeProviderProps) {
     async (params?: {
       feeRate?: number;
       mergeSelfRuneBtcOutputs?: boolean;
+      clientInfo?: string;
     }) => {
       if (!client) throw new Error("Client not available");
       if (!wallet.address || !wallet.paymentAddress) {
         throw new Error("Wallet not connected");
       }
+
       return client.createTransaction({
         address: wallet.address,
         paymentAddress: wallet.paymentAddress,
         feeRate: params?.feeRate,
+        publicKey: wallet.publicKey,
         mergeSelfRuneBtcOutputs: params?.mergeSelfRuneBtcOutputs,
+        clientInfo: params?.clientInfo,
       });
     },
     [client, wallet]

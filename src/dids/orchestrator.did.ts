@@ -310,7 +310,11 @@ export const idlFactory = ({ IDL }: { IDL: any }) => {
       ["query"]
     ),
     get_canister_info: IDL.Func([IDL.Nat64], [Result_2], []),
-    get_exchange_pools: IDL.Func([], [IDL.Vec(ExchangePool)], ["query"]),
+    get_exchange_pools: IDL.Func(
+      [IDL.Opt(IDL.Text)],
+      [IDL.Vec(ExchangePool)],
+      ["query"]
+    ),
     get_failed_invoke_logs: IDL.Func(
       [GetFailedInvokeLogArgs],
       [IDL.Vec(IDL.Tuple(IDL.Text, InvokeLogView))],

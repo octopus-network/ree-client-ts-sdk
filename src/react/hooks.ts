@@ -78,7 +78,7 @@ export function useRuneBalance(
   options: UseBalanceOptions = {}
 ) {
   const { refreshInterval = 0, autoRefresh = true } = options;
-  const { client, address } = useRee();
+  const { client, address, publicKey } = useRee();
   const [balance, setBalance] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -100,7 +100,11 @@ export function useRuneBalance(
     setError(null);
 
     try {
-      const runeBalance = await client.getRuneBalance(address, runeId);
+      const runeBalance = await client.getRuneBalance(
+        address,
+        runeId,
+        publicKey
+      );
       setBalance(runeBalance ?? null);
     } catch (err) {
       setError(

@@ -140,7 +140,10 @@ export class ReeClient {
    * @param address - The ordinals address to check for pending rune UTXOs
    * @returns Array of pending UTXOs containing runes from Ree transactions
    */
-  private async getPendingRuneUtxos(address: string): Promise<Utxo[]> {
+  private async getPendingRuneUtxos(
+    address: string,
+    publicKey?: string
+  ): Promise<Utxo[]> {
     const res = (await this.orchestrator.get_zero_confirmed_utxos_of_address(
       address
     )) as OutpointWithValue[];
@@ -167,6 +170,7 @@ export class ReeClient {
                 },
               ]
             : [],
+          pubkey: publicKey,
         };
       });
   }
@@ -225,10 +229,14 @@ export class ReeClient {
    * @param runeId - The rune ID to filter UTXOs by
    * @returns Array of UTXOs containing the specified rune
    */
-  async getRuneUtxos(address: string, runeId: string): Promise<Utxo[]> {
+  async getRuneUtxos(
+    address: string,
+    runeId: string,
+    publicKey?: string
+  ): Promise<Utxo[]> {
     let cursor = null;
     const data = [];
-    const pendingUtxos = await this.getPendingRuneUtxos(address);
+    const pendingUtxos = await this.getPendingRuneUtxos(address, publicKey);
 
     // Paginate through all rune UTXOs for this specific rune
     do {
@@ -261,6 +269,7 @@ export class ReeClient {
         }),
         satoshis,
         scriptPk: bytesToHex(scriptPk),
+        pubkey: publicKey,
       };
     });
 
@@ -376,9 +385,10 @@ export class ReeClient {
    */
   async getRuneBalance(
     address: string,
-    runeId: string
+    runeId: string,
+    publicKey?: string
   ): Promise<number | undefined> {
-    const runeUtxos = await this.getRuneUtxos(address, runeId);
+    const runeUtxos = await this.getRuneUtxos(address, runeId, publicKey);
 
     if (!runeUtxos) {
       return undefined;
@@ -441,13 +451,17 @@ export class ReeClient {
   async createTransaction({
     address,
     paymentAddress,
+    publicKey,
     feeRate,
     mergeSelfRuneBtcOutputs,
+    clientInfo,
   }: {
     address: string;
     paymentAddress: string;
+    publicKey?: string;
     feeRate?: number;
     mergeSelfRuneBtcOutputs?: boolean;
+    clientInfo?: string;
   }) {
     // Create and return transaction builder
     return new Transaction(
@@ -456,8 +470,10 @@ export class ReeClient {
         exchangeId: this.config.exchangeId,
         address,
         paymentAddress,
+        publicKey,
         feeRate,
         mergeSelfRuneBtcOutputs,
+        clientInfo,
       },
       this
     );

@@ -329,13 +329,14 @@ function MyComponent({ children }) {
 }
 
 function ConnectWalletModal() {
-  const { address, paymentAddress, connect } = useLaserEyes();
+  const { address, paymentAddress, connect, publicKey } = useLaserEyes();
   const { updateWallet } = useRee();
 
   useEffect(() => {
     updateWallet({
       address,
       paymentAddress,
+      publicKey,
     });
   }, [address, paymentAddress, updateWallet]);
 
