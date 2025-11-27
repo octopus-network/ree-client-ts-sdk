@@ -96,12 +96,14 @@ export class Transaction {
       if (!pubkey) {
         if (utxo.address === this.config.address && this.config.publicKey) {
           pubkey = this.config.publicKey;
-        } else {
-          throw new Error("No pubkey found in P2TR UTXO");
         }
       }
 
-      const xOnlyPubkey = pubkey.length === 66 ? pubkey.slice(2) : pubkey;
+      const xOnlyPubkey = pubkey
+        ? pubkey.length === 66
+          ? pubkey.slice(2)
+          : pubkey
+        : undefined;
 
       this.psbt.data.addInput({
         hash: utxo.txid,
@@ -110,7 +112,7 @@ export class Transaction {
           value: BigInt(utxo.satoshis),
           script: hexToBytes(utxo.scriptPk),
         },
-        tapInternalKey: hexToBytes(xOnlyPubkey),
+        tapInternalKey: xOnlyPubkey ? hexToBytes(xOnlyPubkey) : undefined,
       });
     } else {
       this.psbt.data.addInput({
