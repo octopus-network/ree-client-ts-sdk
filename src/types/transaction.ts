@@ -42,3 +42,9 @@ export type Intention = {
   poolUtxos?: Utxo[];
   nonce: bigint;
 };
+
+export type ToSignInput = {
+  publicKey?: string;
+  address?: string;
+  index: number;
+};

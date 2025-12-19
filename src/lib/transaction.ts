@@ -1,4 +1,8 @@
-import type { TransactionConfig, Intention } from "../types/transaction";
+import type {
+  TransactionConfig,
+  Intention,
+  ToSignInput,
+} from "../types/transaction";
 import { AddressType, type AddressTypeName } from "../types/address";
 import type { Utxo } from "../types/utxo";
 import { RuneId, Edict, Runestone, none } from "runelib";
@@ -105,15 +109,26 @@ export class Transaction {
           : pubkey
         : undefined;
 
-      this.psbt.data.addInput({
-        hash: utxo.txid,
-        index: utxo.vout,
-        witnessUtxo: {
-          value: BigInt(utxo.satoshis),
-          script: hexToBytes(utxo.scriptPk),
-        },
-        tapInternalKey: xOnlyPubkey ? hexToBytes(xOnlyPubkey) : undefined,
-      });
+      if (xOnlyPubkey) {
+        this.psbt.data.addInput({
+          hash: utxo.txid,
+          index: utxo.vout,
+          witnessUtxo: {
+            value: BigInt(utxo.satoshis),
+            script: hexToBytes(utxo.scriptPk),
+          },
+          tapInternalKey: hexToBytes(xOnlyPubkey),
+        });
+      } else {
+        this.psbt.data.addInput({
+          hash: utxo.txid,
+          index: utxo.vout,
+          witnessUtxo: {
+            value: BigInt(utxo.satoshis),
+            script: hexToBytes(utxo.scriptPk),
+          },
+        });
+      }
     } else {
       this.psbt.data.addInput({
         hash: utxo.txid,
@@ -934,6 +949,7 @@ export class Transaction {
     psbt: bitcoin.Psbt;
     txid: string;
     fee: bigint;
+    toSignInputs: ToSignInput[];
   }> {
     const addressUtxos = await this.getInvolvedAddressUtxos();
 
@@ -966,6 +982,8 @@ export class Transaction {
 
     const unsignedTxClone = unsignedTx.clone();
 
+    const toSignInputs: ToSignInput[] = [];
+
     for (let i = 0; i < this.inputUtxos.length; i++) {
       const inputUtxo = this.inputUtxos[i];
 
@@ -975,8 +993,16 @@ export class Transaction {
         inputAddress !== this.config.address
       )
         continue;
+
       const redeemScript = this.psbt.data.inputs[i].redeemScript;
       const addressType = getAddressType(inputAddress);
+
+      toSignInputs.push({
+        index: i,
+        ...(addressType === AddressType.P2TR
+          ? { address: inputAddress, disableTweakSigner: false }
+          : { publicKey: inputUtxo.pubkey, disableTweakSigner: true }),
+      });
 
       if (redeemScript && addressType === AddressType.P2SH_P2WPKH) {
         const finalScriptSig = bitcoin.script.compile([redeemScript]);
@@ -990,6 +1016,7 @@ export class Transaction {
       psbt: this.psbt,
       txid,
       fee: this.txFee,
+      toSignInputs,
     };
   }
 

@@ -1,0 +1,857 @@
+diff --git a/node_modules/runelib/dist/runestones.js b/node_modules/runelib/dist/runestones.js
+index 11888bd..5930682 100644
+--- a/node_modules/runelib/dist/runestones.js
++++ b/node_modules/runelib/dist/runestones.js
+@@ -219,22 +219,22 @@ class Runestone {
+         let pushNum;
+         if (msgBuff.length < 0x4c) {
+             pushNum = Buffer.alloc(1);
+-            pushNum.writeUint8(msgBuff.length);
++            pushNum.writeUInt8(msgBuff.length);
+         }
+         else if (msgBuff.length < 0x100) {
+             pushNum = Buffer.alloc(2);
+-            pushNum.writeUint8(0x4c);
+-            pushNum.writeUint8(msgBuff.length);
++            pushNum.writeUInt8(0x4c);
++            pushNum.writeUInt8(msgBuff.length);
+         }
+         else if (msgBuff.length < 0x10000) {
+             pushNum = Buffer.alloc(3);
+-            pushNum.writeUint8(0x4d);
+-            pushNum.writeUint16LE(msgBuff.length);
++            pushNum.writeUInt8(0x4d);
++            pushNum.writeUInt16LE(msgBuff.length);
+         }
+         else if (msgBuff.length < 0x100000000) {
+             pushNum = Buffer.alloc(5);
+-            pushNum.writeUint8(0x4e);
+-            pushNum.writeUint32LE(msgBuff.length);
++            pushNum.writeUInt8(0x4e);
++            pushNum.writeUInt32LE(msgBuff.length);
+         }
+         else {
+             throw new Error("runestone too big!");
+@@ -643,7 +643,7 @@ class EtchInscription {
+                 const val = ls[i + 1];
+                 if (typeof val == 'number') {
+                     const buff = Buffer.alloc(1);
+-                    buff.writeUint8(val);
++                    buff.writeUInt8(val);
+                     fields.set(tag, buff);
+                 }
+                 else {
+diff --git a/node_modules/runelib/dist/runestones.js.bak b/node_modules/runelib/dist/runestones.js.bak
+new file mode 100644
+index 0000000..52eebf0
+--- /dev/null
++++ b/node_modules/runelib/dist/runestones.js.bak
+@@ -0,0 +1,705 @@
++"use strict";
++Object.defineProperty(exports, "__esModule", { value: true });
++exports.EtchInscription = exports.Message = exports.Runestone = exports.Etching = exports.Rune = exports.Terms = exports.Range = exports.Flaw = exports.Tag = exports.Flag = exports.Edict = exports.RuneId = void 0;
++const bitcoinjs_lib_1 = require("bitcoinjs-lib");
++const base26_1 = require("./base26");
++const fts_1 = require("./fts");
++const leb128_1 = require("./leb128");
++const utils_1 = require("./utils");
++const spacers_1 = require("./spacers");
++/**
++ * Rune IDs are represented in text as BLOCK:TX.
++ */
++class RuneId {
++    constructor(block, idx) {
++        this.block = block;
++        this.idx = idx;
++    }
++    next(block, idx) {
++        if (block > BigInt(Number.MAX_SAFE_INTEGER)) {
++            return (0, fts_1.none)();
++        }
++        if (idx > BigInt(Number.MAX_SAFE_INTEGER)) {
++            return (0, fts_1.none)();
++        }
++        let b = BigInt(this.block) + block;
++        if (b > BigInt(Number.MAX_SAFE_INTEGER)) {
++            return (0, fts_1.none)();
++        }
++        let i = block === 0n ? BigInt(this.idx) + idx : idx;
++        if (i > BigInt(Number.MAX_SAFE_INTEGER)) {
++            return (0, fts_1.none)();
++        }
++        return (0, fts_1.some)(new RuneId(Number(b), Number(i)));
++    }
++}
++exports.RuneId = RuneId;
++/**
++ * Rune ID block heights and transaction indices in edicts are delta encoded.
++ * Edict rune ID decoding starts with a base block height and transaction index of zero.
++ * When decoding each rune ID, first the encoded block height delta is added to the base block height.
++ * If the block height delta is zero, the next integer is a transaction index delta.
++ * If the block height delta is greater than zero, the next integer is instead an absolute transaction index.
++ */
++class Edict {
++    constructor(id, amount, output) {
++        this.id = id;
++        this.amount = amount;
++        this.output = output;
++    }
++    static from_integers(tx, id, amount, output) {
++        if (output > 4294967295n || output < 0n) {
++            return (0, fts_1.none)();
++        }
++        if (Number(output) > tx.outs.length) {
++            return (0, fts_1.none)();
++        }
++        return (0, fts_1.some)(new Edict(id, amount, Number(output)));
++    }
++}
++exports.Edict = Edict;
++var Flag;
++(function (Flag) {
++    /** The Etching flag marks this transaction as containing an etching. */
++    Flag[Flag["Etching"] = 0] = "Etching";
++    /** The Terms flag marks this transaction's etching as having open mint terms. */
++    Flag[Flag["Terms"] = 1] = "Terms";
++    /** The Turbo flag marks this transaction's etching as opting into future protocol changes. These protocol changes may increase light client validation costs, or just be highly degenerate. */
++    Flag[Flag["Turbo"] = 2] = "Turbo";
++    /** The Cenotaph flag is unrecognized. */
++    Flag[Flag["Cenotaph"] = 127] = "Cenotaph";
++})(Flag || (exports.Flag = Flag = {}));
++var Tag;
++(function (Tag) {
++    /** The Body tag marks the end of the runestone's fields, causing all following integers to be interpreted as edicts. */
++    Tag[Tag["Body"] = 0] = "Body";
++    /** The Flag field contains a bitmap of flags, whose position is 1 << FLAG_VALUE: */
++    Tag[Tag["Flags"] = 2] = "Flags";
++    /** The Rune field contains the name of the rune being etched. If the Etching flag is set but the Rune field is omitted, a reserved rune name is allocated. */
++    Tag[Tag["Rune"] = 4] = "Rune";
++    /** The Premine field contains the amount of premined runes. */
++    Tag[Tag["Premine"] = 6] = "Premine";
++    /** The Cap field contains the allowed number of mints. */
++    Tag[Tag["Cap"] = 8] = "Cap";
++    /** The Amount field contains the amount of runes each mint transaction receives. */
++    Tag[Tag["Amount"] = 10] = "Amount";
++    /** The HeightStart and HeightEnd fields contain the mint's starting and ending absolute block heights, respectively. The mint is open starting in the block with height HeightStart, and closes in the block with height HeightEnd. */
++    Tag[Tag["HeightStart"] = 12] = "HeightStart";
++    Tag[Tag["HeightEnd"] = 14] = "HeightEnd";
++    /** The OffsetStart and OffsetEnd fields contain the mint's starting and ending block heights, relative to the block in which the etching is mined. The mint is open starting in the block with height OffsetStart + ETCHING_HEIGHT, and closes in the block with height OffsetEnd + ETCHING_HEIGHT. */
++    Tag[Tag["OffsetStart"] = 16] = "OffsetStart";
++    Tag[Tag["OffsetEnd"] = 18] = "OffsetEnd";
++    /** The Mint field contains the Rune ID of the rune to be minted in this transaction. */
++    Tag[Tag["Mint"] = 20] = "Mint";
++    /** The Pointer field contains the index of the output to which runes unallocated by edicts should be transferred. If the Pointer field is absent, unallocated runes are transferred to the first non-OP_RETURN output. */
++    Tag[Tag["Pointer"] = 22] = "Pointer";
++    /** The Cenotaph field is unrecognized. */
++    Tag[Tag["Cenotaph"] = 126] = "Cenotaph";
++    /** The Divisibility field, raised to the power of ten, is the number of subunits in a super unit of runes. */
++    Tag[Tag["Divisibility"] = 1] = "Divisibility";
++    /** The Spacers field is a bitfield of • spacers that should be displayed between the letters of the rune's name. Trailing spacers are ignored. */
++    Tag[Tag["Spacers"] = 3] = "Spacers";
++    /** The Symbol field is the Unicode codepoint of the Rune's currency symbol,
++     * which should be displayed after amounts of that rune. If a rune does not have a currency symbol,
++     * the generic currency character ¤ should be used.
++     * For example, if the Symbol is # and the divisibility is 2,
++     * the amount of 1234 units should be displayed as 12.34 #.
++     */
++    Tag[Tag["Symbol"] = 5] = "Symbol";
++    /** The Nop field is unrecognized. */
++    Tag[Tag["Nop"] = 127] = "Nop";
++})(Tag || (exports.Tag = Tag = {}));
++var Flaw;
++(function (Flaw) {
++    Flaw[Flaw["EdictOutput"] = 0] = "EdictOutput";
++    Flaw[Flaw["EdictRuneId"] = 1] = "EdictRuneId";
++    Flaw[Flaw["InvalidScript"] = 2] = "InvalidScript";
++    Flaw[Flaw["Opcode"] = 3] = "Opcode";
++    Flaw[Flaw["SupplyOverflow"] = 4] = "SupplyOverflow";
++    Flaw[Flaw["TrailingIntegers"] = 5] = "TrailingIntegers";
++    Flaw[Flaw["TruncatedField"] = 6] = "TruncatedField";
++    Flaw[Flaw["UnrecognizedEvenTag"] = 7] = "UnrecognizedEvenTag";
++    Flaw[Flaw["UnrecognizedFlag"] = 8] = "UnrecognizedFlag";
++    Flaw[Flaw["Varint"] = 9] = "Varint";
++})(Flaw || (exports.Flaw = Flaw = {}));
++class Range {
++    constructor(start, end) {
++        this.start = start;
++        this.end = end;
++    }
++}
++exports.Range = Range;
++class Terms {
++    constructor(amount, cap, height, offset) {
++        this.amount = amount;
++        this.cap = cap;
++        this.height = height;
++        this.offset = offset;
++    }
++}
++exports.Terms = Terms;
++class Rune {
++    constructor(value) {
++        this.value = value;
++    }
++    get name() {
++        return Rune.toName(this.value);
++    }
++    static toName(s) {
++        return (0, base26_1.base26Decode)(s);
++    }
++    static fromName(name) {
++        return new Rune((0, base26_1.base26Encode)((0, spacers_1.removeSpacers)(name)));
++    }
++    toString() {
++        return this.name;
++    }
++}
++exports.Rune = Rune;
++class Etching {
++    constructor(divisibility, premine, rune, spacers, symbol, terms, turbo) {
++        this.divisibility = divisibility;
++        this.premine = premine;
++        this.rune = rune;
++        this.spacers = spacers;
++        this.symbol = symbol;
++        this.terms = terms;
++        this.turbo = turbo;
++    }
++}
++exports.Etching = Etching;
++Etching.MAX_DIVISIBILITY = 38;
++Etching.MAX_SPACERS = 134217727;
++class Runestone {
++    constructor(edicts = [], etching, mint, pointer) {
++        this.edicts = edicts;
++        this.etching = etching;
++        this.mint = mint;
++        this.pointer = pointer;
++    }
++    static create(json, type = 'etch') {
++        if (type === 'etch') {
++            json = json;
++            const runename = Rune.fromName(json.name);
++            const terms = new Terms(json.amount, json.cap, new Range(json.startHeight ? (0, fts_1.some)(json.startHeight) : (0, fts_1.none)(), json.endHeight ? (0, fts_1.some)(json.endHeight) : (0, fts_1.none)()), new Range(json.startOffset ? (0, fts_1.some)(json.startOffset) : (0, fts_1.none)(), json.endOffset ? (0, fts_1.some)(json.endOffset) : (0, fts_1.none)()));
++            const divisibility = json.divisibility ? (0, fts_1.some)(json.divisibility) : (0, fts_1.none)();
++            const premine = json.premine ? (0, fts_1.some)(json.premine) : (0, fts_1.none)();
++            const spacers = json.name.indexOf('•') > -1 ? (0, fts_1.some)((0, spacers_1.getSpacersVal)(json.name)) : (0, fts_1.none)();
++            const symbol = json.symbol ? (0, fts_1.some)(json.symbol) : (0, fts_1.none)();
++            const pointer = typeof json.pointer === 'number' ? (0, fts_1.some)(json.pointer) : (0, fts_1.none)();
++            const etching = new Etching(divisibility, premine, (0, fts_1.some)(runename), spacers, symbol, (0, fts_1.some)(terms), true);
++            return new Runestone([], (0, fts_1.some)(etching), (0, fts_1.none)(), pointer);
++        }
++        else if (type === 'mint') {
++            json = json;
++            const pointer = typeof json.pointer === 'number' ? (0, fts_1.some)(json.pointer) : (0, fts_1.none)();
++            return new Runestone([], (0, fts_1.none)(), (0, fts_1.some)(new RuneId(json.block, json.txIdx)), pointer);
++        }
++        else {
++            throw new Error(`not ${type} support now`);
++        }
++    }
++    static decipher(rawTx) {
++        const tx = bitcoinjs_lib_1.Transaction.fromHex(rawTx);
++        const payload = Runestone.payload(tx);
++        if (payload.isSome()) {
++            const integers = Runestone.integers(payload.value());
++            const message = Message.from_integers(tx, integers.value());
++            const etching = message.getEtching();
++            const mint = message.getMint();
++            const pointer = message.getPointer();
++            return (0, fts_1.some)(new Runestone(message.edicts, etching, mint, pointer));
++        }
++        return (0, fts_1.none)();
++    }
++    encipher() {
++        const msg = this.toMessage();
++        const msgBuff = msg.toBuffer();
++        const prefix = Buffer.from('6a5d', 'hex'); // OP_RETURN OP_13
++        let pushNum;
++        if (msgBuff.length < 0x4c) {
++            pushNum = Buffer.alloc(1);
++            pushNum.writeUInt8(msgBuff.length);
++        }
++        else if (msgBuff.length < 0x100) {
++            pushNum = Buffer.alloc(2);
++            pushNum.writeUInt8(0x4c);
++            pushNum.writeUInt8(msgBuff.length);
++        }
++        else if (msgBuff.length < 0x10000) {
++            pushNum = Buffer.alloc(3);
++            pushNum.writeUInt8(0x4d);
++            pushNum.writeUInt16LE(msgBuff.length);
++        }
++        else if (msgBuff.length < 0x100000000) {
++            pushNum = Buffer.alloc(5);
++            pushNum.writeUInt8(0x4e);
++            pushNum.writeUint32LE(msgBuff.length);
++        }
++        else {
++            throw new Error("runestone too big!");
++        }
++        return Buffer.concat([prefix, pushNum, msgBuff]);
++    }
++    static payload(tx) {
++        for (const output of tx.outs) {
++            //script.fromASM
++            const ls = bitcoinjs_lib_1.script.decompile(output.script);
++            if (ls[0] !== bitcoinjs_lib_1.script.OPS.OP_RETURN) {
++                continue;
++            }
++            if (ls[1] !== Runestone.MAGIC_NUMBER) {
++                continue;
++            }
++            for (let i = 2; i < ls.length; i++) {
++                const element = ls[i];
++                if (element instanceof Uint8Array) {
++                    return (0, fts_1.some)(Array.from(element));
++                }
++                return (0, fts_1.none)();
++            }
++            return (0, fts_1.none)();
++        }
++        return (0, fts_1.none)();
++    }
++    static integers(payload) {
++        let integers = [];
++        let i = 0;
++        while (i < payload.length) {
++            let { n, len } = (0, leb128_1.decodeLEB128)(payload.slice(i));
++            integers.push(n);
++            i += len;
++        }
++        return (0, fts_1.some)(integers);
++    }
++    toMessage() {
++        let fields = new Map();
++        const etching = this.etching.value();
++        if (etching) {
++            let flags = 1;
++            if (etching.terms.isSome()) {
++                let mask = 1 << Flag.Terms;
++                flags |= mask;
++            }
++            if (etching.turbo) {
++                let mask = 1 << Flag.Turbo;
++                flags |= mask;
++            }
++            fields.set(Tag.Flags, [BigInt(flags)]);
++            const rune = etching.rune.value();
++            if (rune !== null) {
++                fields.set(Tag.Rune, [BigInt(rune.value)]);
++            }
++            const divisibility = etching.divisibility.value();
++            if (divisibility !== null) {
++                fields.set(Tag.Divisibility, [BigInt(divisibility)]);
++            }
++            const spacers = etching.spacers.value();
++            if (spacers !== null) {
++                fields.set(Tag.Spacers, [BigInt(spacers)]);
++            }
++            const symbol = etching.symbol.value();
++            if (symbol !== null) {
++                fields.set(Tag.Symbol, [BigInt(symbol.charCodeAt(0))]);
++            }
++            const premine = etching.premine.value();
++            if (premine !== null) {
++                fields.set(Tag.Premine, [BigInt(premine)]);
++            }
++            const terms = etching.terms.value();
++            if (terms !== null) {
++                fields.set(Tag.Amount, [BigInt(terms.amount)]);
++                fields.set(Tag.Cap, [BigInt(terms.cap)]);
++                const heightStart = terms.height.start.value();
++                if (heightStart) {
++                    fields.set(Tag.HeightStart, [BigInt(heightStart)]);
++                }
++                const heightEnd = terms.height.end.value();
++                if (heightEnd) {
++                    fields.set(Tag.HeightEnd, [BigInt(heightEnd)]);
++                }
++                const offsetStart = terms.offset.start.value();
++                if (offsetStart) {
++                    fields.set(Tag.OffsetStart, [BigInt(offsetStart)]);
++                }
++                const offsetEnd = terms.offset.end.value();
++                if (offsetEnd) {
++                    fields.set(Tag.OffsetEnd, [BigInt(offsetEnd)]);
++                }
++            }
++        }
++        const mint = this.mint.value();
++        if (mint !== null) {
++            fields.set(Tag.Mint, [BigInt(mint.block), BigInt(mint.idx)]);
++        }
++        const pointer = this.pointer.value();
++        if (pointer !== null) {
++            fields.set(Tag.Pointer, [BigInt(pointer)]);
++        }
++        return new Message(fields, this.edicts, 0);
++    }
++}
++exports.Runestone = Runestone;
++Runestone.MAGIC_NUMBER = 93;
++class Message {
++    constructor(fields = new Map(), edicts = [], flaws = 0) {
++        this.fields = fields;
++        this.edicts = edicts;
++        this.flaws = flaws;
++    }
++    static from_integers(tx, integers) {
++        let fields = new Map();
++        let edicts = [];
++        let flaws = 0;
++        let isBody = false;
++        for (let i = 0; i < integers.length;) {
++            let tag = integers[i];
++            if (Number(tag) === Tag.Body) {
++                isBody = true;
++                i += 1;
++                continue;
++            }
++            if (!isBody) {
++                // Fields:
++                let val = integers[i + 1];
++                const vals = fields.get(Number(tag)) || [];
++                vals.push(val);
++                fields.set(Number(tag), vals);
++                i += 2;
++            }
++            else {
++                // Edicts:
++                let id = new RuneId(0, 0);
++                for (const chunk of (0, utils_1.chunks)(integers.slice(i), 4)) {
++                    if (chunk.length != 4) {
++                        flaws |= Flaw.TrailingIntegers;
++                        break;
++                    }
++                    let next = id.next(chunk[0], chunk[1]);
++                    if (!next.isSome()) {
++                        flaws |= Flaw.EdictRuneId;
++                        break;
++                    }
++                    const edict = Edict.from_integers(tx, next.value(), chunk[2], chunk[3]);
++                    if (!edict.isSome()) {
++                        flaws |= Flaw.EdictOutput;
++                        break;
++                    }
++                    id = next.value();
++                    edicts.push(edict.value());
++                }
++                i += 4;
++            }
++        }
++        return new Message(fields, edicts, flaws);
++    }
++    addFieldVal(tag, val) {
++        const vals = this.fields.get(Number(tag)) || [];
++        vals.push(val);
++        this.fields.set(Number(tag), vals);
++    }
++    addEdict(edict) {
++        this.edicts.push(edict);
++    }
++    toBuffer() {
++        const buffArr = [];
++        // Serialize fields.
++        for (const [tag, vals] of this.fields) {
++            for (const val of vals) {
++                const tagBuff = Buffer.alloc(1);
++                tagBuff.writeUInt8(tag);
++                buffArr.push(tagBuff);
++                buffArr.push(Buffer.from((0, leb128_1.encodeLEB128)(val)));
++            }
++        }
++        // Serialize edicts.
++        if (this.edicts.length > 0) {
++            buffArr.push(Buffer.from('00', 'hex'));
++            // 1) Sort by block height
++            // 2) Sort by tx idx
++            this.edicts.sort((a, b) => {
++                if (a.id.block == b.id.block) {
++                    return a.id.idx - b.id.idx;
++                }
++                return a.id.block - b.id.block;
++            });
++            // 3) Delta encode
++            let lastBlockHeight = 0n;
++            let lastTxIdx = 0n;
++            for (let i = 0; i < this.edicts.length; i++) {
++                const edict = this.edicts[i];
++                if (i == 0) {
++                    lastBlockHeight = BigInt(edict.id.block);
++                    lastTxIdx = BigInt(edict.id.idx);
++                    buffArr.push(Buffer.from((0, leb128_1.encodeLEB128)(lastBlockHeight)));
++                    buffArr.push(Buffer.from((0, leb128_1.encodeLEB128)(lastTxIdx)));
++                }
++                else {
++                    const currBlockHeight = BigInt(edict.id.block);
++                    const currTxIdx = BigInt(edict.id.idx);
++                    if (currBlockHeight == lastBlockHeight) {
++                        const deltaTxIdx = currTxIdx - lastTxIdx;
++                        lastTxIdx = currTxIdx;
++                        buffArr.push(Buffer.from((0, leb128_1.encodeLEB128)(0n)));
++                        buffArr.push(Buffer.from((0, leb128_1.encodeLEB128)(deltaTxIdx)));
++                    }
++                    else {
++                        const deltaBlockHeight = currBlockHeight - lastBlockHeight;
++                        lastBlockHeight = currBlockHeight;
++                        lastTxIdx = currTxIdx;
++                        buffArr.push(Buffer.from((0, leb128_1.encodeLEB128)(deltaBlockHeight)));
++                        buffArr.push(Buffer.from((0, leb128_1.encodeLEB128)(currTxIdx)));
++                    }
++                }
++                buffArr.push(Buffer.from((0, leb128_1.encodeLEB128)(BigInt(edict.amount))));
++                buffArr.push(Buffer.from((0, leb128_1.encodeLEB128)(BigInt(edict.output))));
++            }
++        }
++        return Buffer.concat(buffArr);
++    }
++    getFlags() {
++        return Number(this.fields.get(Tag.Flags));
++    }
++    hasFlags(flag) {
++        const flags = this.getFlags();
++        const mask = 1 << flag;
++        return (flags & mask) != 0;
++    }
++    getMint() {
++        if (!this.fields.has(Tag.Mint)) {
++            return (0, fts_1.none)();
++        }
++        const [block, tx] = this.fields.get(Tag.Mint);
++        return (0, fts_1.some)(new RuneId(Number(block), Number(tx)));
++    }
++    getEtching() {
++        if (!this.hasFlags(Flag.Etching)) {
++            return (0, fts_1.none)();
++        }
++        const divisibility = this.getDivisibility();
++        const premine = this.getPremine();
++        const rune = this.getRune();
++        const spacers = this.getSpacers();
++        const symbol = this.getSymbol();
++        const terms = this.getTerms();
++        const turbo = this.hasFlags(Flag.Turbo);
++        return (0, fts_1.some)(new Etching(divisibility, premine, rune, spacers, symbol, terms, turbo));
++    }
++    getDivisibility() {
++        if (!this.fields.has(Tag.Divisibility)) {
++            return (0, fts_1.none)();
++        }
++        const [divisibility] = this.fields.get(Tag.Divisibility);
++        if (divisibility > Etching.MAX_DIVISIBILITY) {
++            throw new Error("invalid divisibility");
++        }
++        return (0, fts_1.some)(Number(divisibility));
++    }
++    getPremine() {
++        if (!this.fields.has(Tag.Premine)) {
++            return (0, fts_1.none)();
++        }
++        const [premine] = this.fields.get(Tag.Premine);
++        return (0, fts_1.some)(Number(premine));
++    }
++    getRune() {
++        if (!this.fields.has(Tag.Rune)) {
++            return (0, fts_1.none)();
++        }
++        const [rune] = this.fields.get(Tag.Rune);
++        return (0, fts_1.some)(new Rune(rune));
++    }
++    getSpacers() {
++        if (!this.fields.has(Tag.Spacers)) {
++            return (0, fts_1.none)();
++        }
++        const [spacers] = this.fields.get(Tag.Spacers);
++        if (spacers > Etching.MAX_SPACERS) {
++            throw new Error("invalid spacers");
++        }
++        return (0, fts_1.some)(Number(spacers));
++    }
++    getHeightStart() {
++        if (!this.fields.has(Tag.HeightStart)) {
++            return (0, fts_1.none)();
++        }
++        const [heightStart] = this.fields.get(Tag.HeightStart);
++        return (0, fts_1.some)(Number(heightStart));
++    }
++    getHeightEnd() {
++        if (!this.fields.has(Tag.HeightEnd)) {
++            return (0, fts_1.none)();
++        }
++        const [heightEnd] = this.fields.get(Tag.HeightEnd);
++        return (0, fts_1.some)(Number(heightEnd));
++    }
++    getOffsetStart() {
++        if (!this.fields.has(Tag.OffsetStart)) {
++            return (0, fts_1.none)();
++        }
++        const [offsetStart] = this.fields.get(Tag.OffsetStart);
++        return (0, fts_1.some)(Number(offsetStart));
++    }
++    getOffsetEnd() {
++        if (!this.fields.has(Tag.OffsetEnd)) {
++            return (0, fts_1.none)();
++        }
++        const [offsetEnd] = this.fields.get(Tag.OffsetEnd);
++        return (0, fts_1.some)(Number(offsetEnd));
++    }
++    getCap() {
++        if (!this.fields.has(Tag.Cap)) {
++            return (0, fts_1.none)();
++        }
++        const [cap] = this.fields.get(Tag.Cap);
++        return (0, fts_1.some)(Number(cap));
++    }
++    getAmount() {
++        if (!this.fields.has(Tag.Amount)) {
++            return (0, fts_1.none)();
++        }
++        const [amount] = this.fields.get(Tag.Amount);
++        return (0, fts_1.some)(Number(amount));
++    }
++    getSymbol() {
++        if (!this.fields.has(Tag.Symbol)) {
++            return (0, fts_1.none)();
++        }
++        const [symbol] = this.fields.get(Tag.Symbol);
++        return (0, fts_1.some)(String.fromCharCode(Number(symbol)));
++    }
++    getTerms() {
++        if (!this.hasFlags(Flag.Terms)) {
++            return (0, fts_1.none)();
++        }
++        const cap = this.getCap();
++        if (!cap.isSome()) {
++            throw new Error("no cap field");
++        }
++        const amount = this.getAmount();
++        if (!amount.isSome()) {
++            throw new Error("no amount field");
++        }
++        const heightStart = this.getHeightStart();
++        const heightEnd = this.getHeightEnd();
++        const offsetStart = this.getOffsetStart();
++        const offsetEnd = this.getOffsetEnd();
++        const height = new Range(heightStart, heightEnd);
++        const offset = new Range(offsetStart, offsetEnd);
++        return (0, fts_1.some)(new Terms(amount.value(), cap.value(), height, offset));
++    }
++    getPointer() {
++        if (!this.fields.has(Tag.Pointer)) {
++            return (0, fts_1.none)();
++        }
++        const [pointer] = this.fields.get(Tag.Pointer);
++        return (0, fts_1.some)(Number(pointer));
++    }
++}
++exports.Message = Message;
++class EtchInscription {
++    constructor(fields = new Map(), data = Buffer.alloc(0)) {
++        this.fields = fields;
++        this.data = data;
++    }
++    setContent(contentType, data) {
++        this.fields.set(1, Buffer.from(contentType, 'utf8'));
++        this.data = data;
++    }
++    setRune(rune) {
++        const n = (0, base26_1.base26Encode)((0, spacers_1.removeSpacers)(rune));
++        let nstr = n.toString(16);
++        if (nstr.length % 2 === 1) {
++            nstr = '0' + nstr;
++        }
++        this.setField(EtchInscription.Tag.RUNE, Buffer.from(nstr, 'hex').reverse());
++    }
++    setField(field, val) {
++        this.fields.set(field, val);
++    }
++    static decipher(rawTx, inputIdx) {
++        const tx = bitcoinjs_lib_1.Transaction.fromHex(rawTx);
++        const witness = tx.ins[inputIdx].witness;
++        const tapscript = witness[1];
++        const ls = bitcoinjs_lib_1.script.decompile(tapscript);
++        const fields = new Map();
++        const dataChunks = [];
++        let isData = false;
++        for (let i = 5; i < ls.length - 1;) {
++            const chunk = ls[i];
++            if (chunk === 0) {
++                isData = true;
++                i++;
++                continue;
++            }
++            else if (isData) {
++                // Data
++                dataChunks.push(chunk);
++                i++;
++            }
++            else {
++                // Fields
++                const tag = chunk - 80;
++                const val = ls[i + 1];
++                if (typeof val == 'number') {
++                    const buff = Buffer.alloc(1);
++                    buff.writeUInt8(val);
++                    fields.set(tag, buff);
++                }
++                else {
++                    fields.set(tag, val);
++                }
++                i += 2;
++            }
++        }
++        return new EtchInscription(fields, Buffer.concat(dataChunks));
++    }
++    encipher() {
++        const res = [];
++        if (this.data && this.data.length > 0) {
++            res.push(Buffer.from('0063036f7264', 'hex') // 0 OP_IF "ord"
++            );
++            Array.from(this.fields.entries())
++                .sort((a, b) => a[0] - b[0]) // Sorting by tag in ascending order
++                .forEach(([tag, val]) => {
++                const tagBuff = Buffer.alloc(1);
++                tagBuff.writeUInt8(tag);
++                res.push(Buffer.from('01', 'hex'));
++                res.push(tagBuff);
++                if (val.length != 1 || val[0] != 0x00) {
++                    res.push((0, utils_1.toPushData)(val));
++                }
++                else {
++                    res.push(val);
++                }
++            });
++            res.push(Buffer.from('00', 'hex'));
++            const dataChunks = (0, utils_1.chunks)(Array.from(this.data), 520);
++            for (const chunk of dataChunks) {
++                res.push((0, utils_1.toPushData)(Buffer.from(chunk)));
++            }
++        }
++        else {
++            res.push(Buffer.from('0063', 'hex') // 0 OP_IF
++            );
++            const rune = this.fields.get(EtchInscription.Tag.RUNE);
++            if (!rune) {
++                throw new Error(`No rune found!`);
++            }
++            res.push((0, utils_1.toPushData)(rune));
++        }
++        res.push(Buffer.from('68', 'hex')); // OP_ENDIF
++        return Buffer.concat(res);
++    }
++}
++exports.EtchInscription = EtchInscription;
++EtchInscription.Tag = {
++    CONTENT_TYPE: 1,
++    POINTER: 2,
++    PARENT: 3,
++    METADATA: 5,
++    METAPROTOCOL: 7,
++    CONTENT_ENCODING: 9,
++    DELEGATE: 11,
++    RUNE: 13
++};
+diff --git a/node_modules/runelib/dist/utils.js b/node_modules/runelib/dist/utils.js
+index 4d70a9e..1ff1e1e 100644
+--- a/node_modules/runelib/dist/utils.js
++++ b/node_modules/runelib/dist/utils.js
+@@ -60,14 +60,14 @@ function toPushData(data) {
+         // OP_PUSHDATA2
+         res.push(Buffer.from('4d', 'hex'));
+         const dLenBuff = Buffer.alloc(2);
+-        dLenBuff.writeUint16LE(dLen);
++        dLenBuff.writeUInt16LE(dLen);
+         res.push(dLenBuff);
+     }
+     else {
+         // OP_PUSHDATA4
+         res.push(Buffer.from('4e', 'hex'));
+         const dLenBuff = Buffer.alloc(4);
+-        dLenBuff.writeUint32LE(dLen);
++        dLenBuff.writeUInt32LE(dLen);
+         res.push(dLenBuff);
+     }
+     res.push(data);
+diff --git a/node_modules/runelib/dist/utils.js.bak b/node_modules/runelib/dist/utils.js.bak
+new file mode 100644
+index 0000000..fad0b84
+--- /dev/null
++++ b/node_modules/runelib/dist/utils.js.bak
+@@ -0,0 +1,76 @@
++"use strict";
++Object.defineProperty(exports, "__esModule", { value: true });
++exports.toPushData = exports.chunks = exports.toHex = exports.zero2 = void 0;
++/**
++ * Prepends a '0' to an odd character length word to ensure it has an even number of characters.
++ * @param {string} word - The input word.
++ * @returns {string} - The word with a leading '0' if it's an odd character length; otherwise, the original word.
++ */
++const zero2 = (word) => {
++    if (word.length % 2 === 1) {
++        return '0' + word;
++    }
++    else {
++        return word;
++    }
++};
++exports.zero2 = zero2;
++/**
++ * Converts an array of numbers to a hexadecimal string representation.
++ * @param {number[]} msg - The input array of numbers.
++ * @returns {string} - The hexadecimal string representation of the input array.
++ */
++const toHex = (msg) => {
++    let res = '';
++    for (let i = 0; i < msg.length; i++) {
++        res += (0, exports.zero2)(msg[i].toString(16));
++    }
++    return res;
++};
++exports.toHex = toHex;
++function chunks(bin, chunkSize) {
++    const chunks = [];
++    let offset = 0;
++    while (offset < bin.length) {
++        // Use Buffer.slice to create a chunk. This method does not copy the memory;
++        // it creates a new Buffer that references the original memory.
++        const chunk = bin.slice(offset, offset + chunkSize);
++        chunks.push(chunk);
++        offset += chunkSize;
++    }
++    return chunks;
++}
++exports.chunks = chunks;
++function toPushData(data) {
++    const res = [];
++    const dLen = data.length;
++    if (dLen < 0x4c) {
++        const dLenBuff = Buffer.alloc(1);
++        dLenBuff.writeUInt8(dLen);
++        res.push(dLenBuff);
++    }
++    else if (dLen <= 0xff) {
++        // OP_PUSHDATA1
++        res.push(Buffer.from('4c', 'hex'));
++        const dLenBuff = Buffer.alloc(1);
++        dLenBuff.writeUInt8(dLen);
++        res.push(dLenBuff);
++    }
++    else if (dLen <= 0xffff) {
++        // OP_PUSHDATA2
++        res.push(Buffer.from('4d', 'hex'));
++        const dLenBuff = Buffer.alloc(2);
++        dLenBuff.writeUInt16LE(dLen);
++        res.push(dLenBuff);
++    }
++    else {
++        // OP_PUSHDATA4
++        res.push(Buffer.from('4e', 'hex'));
++        const dLenBuff = Buffer.alloc(4);
++        dLenBuff.writeUint32LE(dLen);
++        res.push(dLenBuff);
++    }
++    res.push(data);
++    return Buffer.concat(res);
++}
++exports.toPushData = toPushData;
