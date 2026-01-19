@@ -81,11 +81,11 @@ export class Transaction {
    * Add a UTXO as transaction input
    * @param utxo - The UTXO to add as input
    */
-  private addInput(utxo: Utxo) {
+  addInput(utxo: Utxo) {
     // Ignore if already added
     if (
       this.inputUtxos.findIndex(
-        (i) => i.txid === utxo.txid && i.vout === utxo.vout
+        (i) => i.txid === utxo.txid && i.vout === utxo.vout,
       ) >= 0
     ) {
       return;
@@ -158,7 +158,7 @@ export class Transaction {
    * @param address - Recipient address
    * @param amount - Amount in satoshis
    */
-  private addOutput(address: string, amount: bigint) {
+  addOutput(address: string, amount: bigint) {
     this.psbt.addOutput({
       address,
       value: amount,
@@ -170,7 +170,7 @@ export class Transaction {
    * Add an OP_RETURN script output (for Runestone)
    * @param script - The script buffer to include
    */
-  private addScriptOutput(script: Uint8Array) {
+  addScriptOutput(script: Uint8Array) {
     this.psbt.addOutput({
       script,
       value: BigInt(0),
@@ -189,7 +189,7 @@ export class Transaction {
   private selectRuneUtxos(
     runeUtxos: Utxo[],
     runeId: string,
-    runeAmount: bigint
+    runeAmount: bigint,
   ) {
     const selectedUseRuneUtxos: Utxo[] = [];
 
@@ -240,7 +240,7 @@ export class Transaction {
   private selectBtcUtxos(
     btcUtxos: Utxo[],
     btcAmount: bigint,
-    isPoolAddress = false
+    isPoolAddress = false,
   ) {
     const selectedUtxos: Utxo[] = [];
 
@@ -264,7 +264,7 @@ export class Transaction {
 
     if (totalAmount < btcAmount) {
       throw new Error(
-        `Insufficient BTC UTXOs: need ${btcAmount}, have ${totalAmount}`
+        `Insufficient BTC UTXOs: need ${btcAmount}, have ${totalAmount}`,
       );
     }
 
@@ -305,7 +305,7 @@ export class Transaction {
       if (manualFeeRate !== undefined) {
         const estimatedVBytes = Transaction.estimateTxVirtualSize(
           this.inputAddressTypes,
-          this.outputAddressTypes
+          this.outputAddressTypes,
         );
         currentFee = BigInt(Math.round(manualFeeRate * estimatedVBytes));
       } else {
@@ -337,12 +337,12 @@ export class Transaction {
 
         // Update input types for next fee calculation
         this.inputAddressTypes = inputAddressTypesClone.concat(
-          _selectedUtxos.map(() => paymentAddressType)
+          _selectedUtxos.map(() => paymentAddressType),
         );
 
         const totalBtcAmount = _selectedUtxos.reduce(
           (total, curr) => total + BigInt(curr.satoshis),
-          BigInt(0)
+          BigInt(0),
         );
 
         // Remove change output from fee calculation if change is too small
@@ -479,7 +479,7 @@ export class Transaction {
           try {
             btc[address] = await this.client.getBtcUtxos(
               address,
-              !poolAddresses.includes(address)
+              !poolAddresses.includes(address),
             );
           } catch {
             btc[address] = [];
@@ -492,15 +492,15 @@ export class Transaction {
               try {
                 rune[address][runeId] = await this.client.getRuneUtxos(
                   address,
-                  runeId
+                  runeId,
                 );
               } catch {
                 rune[address][runeId] = [];
               }
-            })
+            }),
           );
         }
-      })
+      }),
     );
 
     return { btc, rune };
@@ -591,7 +591,7 @@ export class Transaction {
           const existing = passthroughPoolUtxos.get(poolAddress);
           passthroughPoolUtxos.set(
             poolAddress,
-            existing ? existing.concat(poolUtxos) : [...poolUtxos]
+            existing ? existing.concat(poolUtxos) : [...poolUtxos],
           );
           passthroughPools.add(poolAddress);
           return;
@@ -610,7 +610,7 @@ export class Transaction {
             (addressOutputCoinAmounts[to][coin.id] ?? BigInt(0)) +
             BigInt(coin.value);
         });
-      }
+      },
     );
 
     for (const [address, utxos] of passthroughPoolUtxos.entries()) {
@@ -632,7 +632,7 @@ export class Transaction {
 
     // Select UTXOs based on addressSendCoinAmounts and calculate change
     for (const [address, coinAmounts] of Object.entries(
-      addressInputCoinAmounts
+      addressInputCoinAmounts,
     )) {
       for (const [coinId, requiredAmount] of Object.entries(coinAmounts)) {
         if (coinId === BITCOIN_ID) {
@@ -646,13 +646,13 @@ export class Transaction {
           const selectedUtxos = this.selectBtcUtxos(
             btcUtxos,
             requiredAmount,
-            poolAddresses.includes(address)
+            poolAddresses.includes(address),
           );
 
           // Calculate total input amount
           const totalInputAmount = selectedUtxos.reduce(
             (total, utxo) => total + BigInt(utxo.satoshis),
-            BigInt(0)
+            BigInt(0),
           );
 
           // Calculate change
@@ -690,7 +690,7 @@ export class Transaction {
           const selectedUtxos = this.selectRuneUtxos(
             runeUtxos,
             coinId,
-            requiredAmount
+            requiredAmount,
           );
 
           // Calculate total input rune amount
@@ -701,7 +701,7 @@ export class Transaction {
 
           const totalRuneUtxoSats = selectedUtxos.reduce(
             (total, utxo) => total + BigInt(utxo.satoshis),
-            BigInt(0)
+            BigInt(0),
           );
 
           // Calculate rune change
@@ -737,7 +737,7 @@ export class Transaction {
 
     // We should add all pool utxos
     for (const [address, coinAmounts] of Object.entries(
-      addressOutputCoinAmounts
+      addressOutputCoinAmounts,
     )) {
       // Skip if this address already processed as input
       if (
@@ -755,7 +755,7 @@ export class Transaction {
           // Calculate total input amount
           const totalInputAmount = btcUtxos.reduce(
             (total, utxo) => total + BigInt(utxo.satoshis),
-            BigInt(0)
+            BigInt(0),
           );
 
           addressOutputCoinAmounts[address] ??= {};
@@ -814,7 +814,7 @@ export class Transaction {
    */
 
   private addOutputs(
-    addressReceiveCoinAmounts: Record<string, Record<string, bigint>>
+    addressReceiveCoinAmounts: Record<string, Record<string, bigint>>,
   ) {
     const mergeSelfRuneBtcOutputs =
       this.config.mergeSelfRuneBtcOutputs === true;
@@ -842,11 +842,11 @@ export class Transaction {
       runeIds.forEach((runeIdStr: string) => {
         const runeId = new RuneId(
           Number(runeIdStr.split(":")[0]),
-          Number(runeIdStr.split(":")[1])
+          Number(runeIdStr.split(":")[1]),
         );
 
         for (const [address, coinAmounts] of Object.entries(
-          addressReceiveCoinAmounts
+          addressReceiveCoinAmounts,
         )) {
           const runeAmount = coinAmounts[runeIdStr] ?? BigInt(0);
           if (runeAmount > BigInt(0)) {
@@ -891,7 +891,7 @@ export class Transaction {
 
     // Add remaining BTC-only outputs
     for (const [address, coinAmounts] of Object.entries(
-      addressReceiveCoinAmounts
+      addressReceiveCoinAmounts,
     )) {
       const btcAmount = coinAmounts[BITCOIN_ID] ?? BigInt(0);
       if (btcAmount > BigInt(0)) {
@@ -952,30 +952,33 @@ export class Transaction {
     toSignInputs: ToSignInput[];
   }> {
     const addressUtxos = await this.getInvolvedAddressUtxos();
-
-    // Reset pool UTXOs if provided
-    for (const it of this.intentions) {
-      const pu = (it as any).poolUtxos as Utxo[];
-      if (!pu) continue;
-      addressUtxos.btc[it.poolAddress] = pu;
-      addressUtxos.rune[it.poolAddress] = {};
-      const runeMap = addressUtxos.rune[it.poolAddress];
-      for (const utxo of pu) {
-        for (const r of utxo.runes) (runeMap[r.id] ??= []).push(utxo);
-      }
-    }
-
-    // Get output coin amounts of addresses
-    const { addressOutputCoinAmounts, paymentBtcRequired } =
-      this.addInputsAndCalculateOutputs(addressUtxos);
-
-    // Add outputs by the output coin amounts
-    this.addOutputs(addressOutputCoinAmounts);
-
     const paymentAddress = this.config.paymentAddress;
     const userBtcUtxos = addressUtxos.btc[paymentAddress] ?? [];
 
-    await this.addBtcAndFees(userBtcUtxos, paymentBtcRequired);
+    if (!this.config.manualBuild) {
+      // Reset pool UTXOs if provided
+      for (const it of this.intentions) {
+        const pu = (it as any).poolUtxos as Utxo[];
+        if (!pu) continue;
+        addressUtxos.btc[it.poolAddress] = pu;
+        addressUtxos.rune[it.poolAddress] = {};
+        const runeMap = addressUtxos.rune[it.poolAddress];
+        for (const utxo of pu) {
+          for (const r of utxo.runes) (runeMap[r.id] ??= []).push(utxo);
+        }
+      }
+
+      // Get output coin amounts of addresses
+      const { addressOutputCoinAmounts, paymentBtcRequired } =
+        this.addInputsAndCalculateOutputs(addressUtxos);
+
+      // Add outputs by the output coin amounts
+      this.addOutputs(addressOutputCoinAmounts);
+
+      await this.addBtcAndFees(userBtcUtxos, paymentBtcRequired);
+    } else {
+      await this.addBtcAndFees(userBtcUtxos, BigInt(0));
+    }
 
     //@ts-expect-error: todo
     const unsignedTx = this.psbt.__CACHE.__TX;
@@ -1022,7 +1025,7 @@ export class Transaction {
 
   private static estimateTxVirtualSize(
     inputTypes: AddressType[],
-    outputTypes: AddressType[]
+    outputTypes: AddressType[],
   ): number {
     const inputCount = inputTypes.length;
     const outputCount = outputTypes.length;
@@ -1111,6 +1114,59 @@ export class Transaction {
     return 9;
   }
 
+  async getToSpendUtxos() {
+    return this.inputUtxos.filter(
+      (u) =>
+        u.address === this.config.paymentAddress ||
+        u.address === this.config.address,
+    );
+  }
+
+  async getUtxoProof() {
+    const utxos = await this.getToSpendUtxos();
+    const utxoProof = await getUtxoProof(utxos, this.config.network);
+
+    if (!utxoProof) {
+      throw new Error("Failed to get utxo proof");
+    }
+
+    return utxoProof;
+  }
+
+  async getInvokeArgs(signedPsbtHex: string) {
+    const initiatorUtxoProof = await this.getUtxoProof();
+    return {
+      intention_set: {
+        tx_fee_in_sats: Number(this.txFee),
+        initiator_address: this.config.paymentAddress,
+        intentions: this.intentions.map(
+          ({
+            action,
+            actionParams,
+            poolAddress,
+            inputCoins,
+            outputCoins,
+            exchangeId,
+            nonce,
+          }) => ({
+            exchange_id: exchangeId ?? this.config.exchangeId,
+            input_coins: inputCoins.filter((c) => c.from !== poolAddress),
+            output_coins: outputCoins,
+            pool_address: poolAddress,
+            action,
+            action_params: actionParams ?? "",
+            pool_utxo_spent: [],
+            pool_utxo_received: [],
+            nonce: Number(nonce),
+          }),
+        ),
+      },
+      initiator_utxo_proof: initiatorUtxoProof,
+      psbt_hex: signedPsbtHex,
+      client_info: [this.config.clientInfo ?? ""],
+    };
+  }
+
   /**
    * Submit the signed transaction to the orchestrator for execution
    * This method sends the signed PSBT along with the intention set to the orchestrator canister
@@ -1131,53 +1187,11 @@ export class Transaction {
       throw new Error("No itentions added");
     }
 
-    const initiatorUtxos = this.inputUtxos.filter(
-      (u) =>
-        u.address === this.config.paymentAddress ||
-        u.address === this.config.address
-    );
-
-    const initiatorUtxoProof = await getUtxoProof(
-      initiatorUtxos,
-      this.config.network
-    );
-
-    if (!initiatorUtxoProof) {
-      throw new Error("Failed to get utxo proof");
-    }
+    const invokeArgs = await this.getInvokeArgs(signedPsbtHex);
 
     return (
       this.client.orchestrator
-        .invoke({
-          intention_set: {
-            tx_fee_in_sats: this.txFee,
-            initiator_address: this.config.paymentAddress,
-            intentions: this.intentions.map(
-              ({
-                action,
-                actionParams,
-                poolAddress,
-                inputCoins,
-                outputCoins,
-                exchangeId,
-                nonce,
-              }) => ({
-                exchange_id: exchangeId ?? this.config.exchangeId,
-                input_coins: inputCoins.filter((c) => c.from !== poolAddress),
-                output_coins: outputCoins,
-                pool_address: poolAddress,
-                action,
-                action_params: actionParams ?? "",
-                pool_utxo_spent: [],
-                pool_utxo_received: [],
-                nonce,
-              })
-            ),
-          },
-          initiator_utxo_proof: initiatorUtxoProof,
-          psbt_hex: signedPsbtHex,
-          client_info: [this.config.clientInfo ?? ""],
-        })
+        .invoke(invokeArgs)
         // eslint-disable-next-line
         .then((data: any) => {
           if (data?.Ok) {
@@ -1196,7 +1210,7 @@ export class Transaction {
                       "Unknown Error"
                     }`
                   : `Invoke Error: ${JSON.stringify(data)}`
-                : `Invoke Error: ${JSON.stringify(data)}`
+                : `Invoke Error: ${JSON.stringify(data)}`,
             );
           }
         })

@@ -31,6 +31,7 @@ interface ReeContextValue {
     feeRate?: number;
     mergeSelfRuneBtcOutputs?: boolean;
     clientInfo?: string;
+    manualBuild?: boolean;
   }) => Promise<Transaction>;
 }
 
@@ -82,6 +83,7 @@ export function ReeProvider({ children, config }: ReeProviderProps) {
       feeRate?: number;
       mergeSelfRuneBtcOutputs?: boolean;
       clientInfo?: string;
+      manualBuild?: boolean;
     }) => {
       if (!client) throw new Error("Client not available");
       if (!wallet.address || !wallet.paymentAddress) {
@@ -95,6 +97,7 @@ export function ReeProvider({ children, config }: ReeProviderProps) {
         publicKey: wallet.publicKey,
         mergeSelfRuneBtcOutputs: params?.mergeSelfRuneBtcOutputs,
         clientInfo: params?.clientInfo,
+        manualBuild: params?.manualBuild,
       });
     },
     [client, wallet]

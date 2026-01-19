@@ -29,7 +29,7 @@ export class Maestro {
         };
         data: RawBtcUtxo[];
       }>(
-        `/addresses/${address}/utxos?filter_dust=true&filter_dust_threshold=547&exclude_metaprotocols=${excludeMetaprotocols}&ignore_used_brc20=true&order=asc&count=100${
+        `/addresses/${address}/utxos?filter_dust=true&filter_dust_threshold=330&exclude_metaprotocols=${excludeMetaprotocols}&ignore_used_brc20=true&order=asc&count=100${
           cursor ? `&cursor=${cursor}` : ""
         }`
       )
@@ -52,7 +52,7 @@ export class Maestro {
         };
         data: RawBtcUtxo[];
       }>(
-        `/mempool/addresses/${address}/utxos?filter_dust=true&exclude_metaprotocols=${excludeMetaprotocols}&filter_dust_threshold=547&order=asc&count=100${
+        `/mempool/addresses/${address}/utxos?filter_dust=true&exclude_metaprotocols=${excludeMetaprotocols}&filter_dust_threshold=330&order=asc&count=100${
           cursor ? `&cursor=${cursor}` : ""
         }`
       )

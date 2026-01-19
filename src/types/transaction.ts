@@ -15,6 +15,7 @@ export interface TransactionConfig {
    * instead of emitting a separate dust output. Defaults to false.
    */
   mergeSelfRuneBtcOutputs?: boolean;
+  manualBuild?: boolean;
 }
 
 export type CoinBalance = {

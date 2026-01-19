@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRee } from "./ReeProvider";
 import type { Utxo } from "../types/utxo";
-import type { RuneInfo } from "../types/rune";
 import type { Pool, PoolInfo } from "../types/pool";
 
 interface UseBalanceOptions {
@@ -257,72 +256,6 @@ export function useRuneUtxos(runeId: string, options: UseBalanceOptions = {}) {
     loading,
     error,
     refetch: fetchUtxos,
-  };
-}
-
-/**
- * Hook to search for runes by keyword
- * @param keyword - Search term (rune ID or partial name)
- * @returns Object with runes, loading state, error, and search function
- */
-export function useSearchRunes() {
-  const { client } = useRee();
-
-  const searchRunes = useCallback(
-    async (searchKeyword?: string) => {
-      const searchTerm = searchKeyword;
-      if (!searchTerm) {
-        throw new Error("Search keyword is required");
-      }
-
-      const results = await client.searchRunes(searchTerm);
-      return results;
-    },
-    [client]
-  );
-
-  return searchRunes;
-}
-
-/**
- * Hook to get rune information by ID
- * @param runeId - The rune ID to get info for
- * @returns Object with rune info, loading state, error, and refetch function
- */
-export function useRuneInfo(runeId?: string) {
-  const { client } = useRee();
-  const [runeInfo, setRuneInfo] = useState<RuneInfo | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchRuneInfo = useCallback(async () => {
-    if (!runeId) {
-      setRuneInfo(null);
-      setError("Rune ID is required");
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      const info = await client.getRuneInfo(runeId);
-      setRuneInfo(info || null);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to fetch rune info"
-      );
-      setRuneInfo(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [client, runeId]);
-
-  return {
-    runeInfo,
-    loading,
-    error,
-    refetch: fetchRuneInfo,
   };
 }
 

@@ -53,9 +53,6 @@ const btcBalance = await client.getBtcBalance("bc1q..."); // payment address
 
 const runeBalance = await client.getRuneBalance("bc1q...", "RUNE_ID"); // address, runeId
 
-// Search for runes
-const runes = await client.searchRunes("DOG");
-
 // Get pool information
 const pools = await client.getPoolList();
 const poolInfo = await client.getPoolInfo("pool-address");
@@ -369,11 +366,6 @@ new ReeClient(config: Config)
 - `getRuneBalance(address: string, runeId: string): Promise<number | undefined>` - Get balance for a specific rune
 - `getRuneUtxos(address: string, runeId: string): Promise<Utxo[]>` - Get UTXOs containing a specific rune
 
-##### Rune Information Methods
-
-- `searchRunes(keyword: string): Promise<RuneInfo[]>` - Search for runes by keyword or rune ID
-- `getRuneInfo(runeId: string): Promise<RuneInfo | undefined>` - Get detailed information for a specific rune
-
 ##### Pool Methods
 
 - `getPoolList(): Promise<Pool[]>` - Get list of all available liquidity pools
@@ -456,7 +448,6 @@ import {
   useRuneBalance,
   useBtcUtxos,
   useRuneUtxos,
-  useSearchRunes,
   useRuneInfo,
   usePoolList,
   usePoolInfo,
@@ -477,17 +468,9 @@ function TradingDashboard() {
 
   const [runes, setRunes] = useState([]);
 
-  // Rune search hooks
-  const searchRunes = useSearchRunes();
-  const { runeInfo } = useRuneInfo("840000:3");
-
   // Pool hooks
   const { pools } = usePoolList();
   const { poolInfo } = usePoolInfo("bc1q...");
-
-  const handleSearch = () => {
-    searchRunes("IRCH").then(setRunes); // Search for runes containing "RICH"
-  };
 
   return (
     <div>
@@ -500,10 +483,6 @@ function TradingDashboard() {
           ? "Loading..."
           : `${feeRate?.min?.toString()} - ${feeRate?.max?.toString()} sat/vB`}
       </div>
-
-      <h2>Search Runes</h2>
-      <button onClick={handleSearch}>Search DOG</button>
-      <div>{runes.length} runes found</div>
 
       <h2>Pools</h2>
       <div>{pools.length} pools available</div>
@@ -520,11 +499,6 @@ function TradingDashboard() {
 - `useRuneBalance(runeId, options?)` - Rune balance for specific rune
 - `useBtcUtxos(options?)` - Bitcoin UTXOs management
 - `useRuneUtxos(runeId, options?)` - Rune UTXOs for specific rune
-
-**Rune Information Hooks:**
-
-- `useSearchRunes(keyword?, options?)` - Search runes by keyword
-- `useRuneInfo(runeId?, options?)` - Get rune information by ID
 
 **Pool Hooks:**
 
@@ -544,9 +518,6 @@ const { runeInfo } = useRuneInfo("840000:3", { refreshInterval: 30000 });
 // Get pools with manual refresh only
 const { pools, refetch } = usePoolList({ autoRefresh: false });
 
-// Search runes
-const searchRuens = useSearchRunes();
-await searchRunes("RICH");
 ```
 
 ### Core useRee Hook

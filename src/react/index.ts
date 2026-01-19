@@ -4,8 +4,6 @@ export {
   useRuneBalance,
   useBtcUtxos,
   useRuneUtxos,
-  useSearchRunes,
-  useRuneInfo,
   usePoolList,
   usePoolInfo,
   useRecommendedFeeRate,

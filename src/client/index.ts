@@ -8,8 +8,6 @@ import { Transaction } from "../lib/transaction";
 import type { OutpointWithValue, Utxo } from "../types/utxo";
 import { bytesToHex, getAddressType, getScriptByAddress } from "../utils";
 
-import { gql, GraphQLClient } from "graphql-request";
-import type { RuneInfo } from "../types/rune";
 import Decimal from "decimal.js";
 
 import { idlFactory as orchestratorIdlFactory } from "../dids/orchestrator.did";
@@ -17,8 +15,6 @@ import { idlFactory as orchestratorIdlFactory } from "../dids/orchestrator.did";
 import {
   ORCHESTRATOR_CANISTER_ID,
   ORCHESTRATOR_CANISTER_ID_TESTNET,
-  RUNES_INDEXER_URL,
-  RUNES_INDEXER_URL_TESTNET,
 } from "../constants";
 
 /**
@@ -277,93 +273,6 @@ export class ReeClient {
   }
 
   /**
-   * Search for runes by keyword or rune ID
-   * Supports both exact rune ID matches and fuzzy name matching
-   * @param keyword - Search term (rune ID or partial name)
-   * @returns Array of matching rune information
-   */
-  async searchRunes(keyword: string): Promise<RuneInfo[]> {
-    // Select appropriate indexer URL based on network
-    const runesIndexerUrl =
-      this.config.network === Network.Testnet
-        ? RUNES_INDEXER_URL_TESTNET
-        : RUNES_INDEXER_URL;
-
-    // GraphQL query for rune search
-    const runesQuery = gql`
-      query GetRunes($keyword: String!, $regex: String!) {
-        runes(
-          where: {
-            _or: [
-              { rune_id: { _eq: $keyword } }
-              { spaced_rune: { _iregex: $regex } }
-            ]
-          }
-          limit: 100
-        ) {
-          rune_id
-          spaced_rune
-          symbol
-          id
-          number
-          etching
-          divisibility
-        }
-      }
-    `;
-
-    const runesClient = new GraphQLClient(runesIndexerUrl);
-
-    // Create regex pattern for fuzzy matching
-    // Remove spacers and create flexible pattern
-    const pattern = keyword
-      .split("")
-      .filter((t) => {
-        if (t === "•" || t === " ") {
-          return false;
-        }
-        return true;
-      })
-      .join("•?");
-
-    // Execute GraphQL query
-    const { runes } = (await runesClient.request(runesQuery, {
-      keyword,
-      regex: `(?i)${pattern}`,
-    })) as unknown as {
-      runes: {
-        rune_id: string;
-        symbol: string;
-        spaced_rune: string;
-        divisibility: number;
-        etching: string;
-      }[];
-    };
-
-    // Transform to internal RuneInfo format
-    return runes.map(
-      ({ rune_id, spaced_rune, symbol, divisibility, etching }) => ({
-        runeId: rune_id,
-        spacedRune: spaced_rune,
-        symbol,
-        divisibility,
-        etching,
-      })
-    );
-  }
-
-  /**
-   * Get detailed information for a specific rune by ID
-   * @param runeId - The rune ID to look up
-   * @returns Rune information or undefined if not found
-   */
-  async getRuneInfo(runeId: string): Promise<RuneInfo | undefined> {
-    // Use search API to find exact match by rune ID
-    const matchingRunes = await this.searchRunes(runeId);
-    return matchingRunes[0];
-  }
-
-  /**
    * Get total Bitcoin balance from all UTXOs
    * @returns Total balance in satoshis
    */
@@ -455,6 +364,7 @@ export class ReeClient {
     feeRate,
     mergeSelfRuneBtcOutputs,
     clientInfo,
+    manualBuild,
   }: {
     address: string;
     paymentAddress: string;
@@ -462,6 +372,7 @@ export class ReeClient {
     feeRate?: number;
     mergeSelfRuneBtcOutputs?: boolean;
     clientInfo?: string;
+    manualBuild?: boolean;
   }) {
     // Create and return transaction builder
     return new Transaction(
@@ -474,6 +385,7 @@ export class ReeClient {
         feeRate,
         mergeSelfRuneBtcOutputs,
         clientInfo,
+        manualBuild,
       },
       this
     );
