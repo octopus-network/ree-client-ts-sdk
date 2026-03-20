@@ -7,6 +7,7 @@ export interface TransactionConfig {
   address: string;
   paymentAddress: string;
   publicKey?: string;
+  paymentPublicKey?: string;
   clientInfo?: string;
   /** Optional manual fee rate in satoshis per virtual byte */
   feeRate?: number;

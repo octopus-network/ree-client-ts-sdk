@@ -3,7 +3,7 @@ import { IDL } from "@dfinity/candid";
 
 export type Config = {
   network: Network;
-  maestroApiKey: string;
+  xverseApiKey: string;
   exchangeIdlFactory: IDL.InterfaceFactory;
   exchangeId: string;
   exchangeCanisterId: string;

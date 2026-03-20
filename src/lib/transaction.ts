@@ -287,6 +287,23 @@ export class Transaction {
     const userInputUtxoDusts = this.userInputUtxoDusts;
     const manualFeeRate = this.config.feeRate;
 
+    // In manual mode, calculate existing inputs/outputs
+    let manualInputTotal = BigInt(0);
+    let manualOutputTotal = BigInt(0);
+
+    if (this.config.manualBuild) {
+      // Calculate total from all manually added inputs
+      manualInputTotal = this.inputUtxos.reduce(
+        (sum, utxo) => sum + BigInt(utxo.satoshis),
+        BigInt(0),
+      );
+
+      // Calculate total from all manually added outputs (excluding change)
+      for (const output of this.psbt.txOutputs) {
+        manualOutputTotal += BigInt(output.value);
+      }
+    }
+
     this.outputAddressTypes.push(paymentAddressType);
     let changePlaceholderActive = true;
 
@@ -324,15 +341,25 @@ export class Transaction {
         currentFee = res.Ok;
       }
 
-      targetBtcAmount =
-        btcAmount + currentFee + additionalDustNeeded - userInputUtxoDusts;
+      // In manual mode, calculate how much more BTC we need
+      if (this.config.manualBuild) {
+        // Already have inputs, need to cover: outputs + fee + dust - existing inputs
+        targetBtcAmount =
+          manualOutputTotal + currentFee + additionalDustNeeded - manualInputTotal;
+      } else {
+        // Auto mode: need to cover btcAmount + fee + dust - user input dusts
+        targetBtcAmount =
+          btcAmount + currentFee + additionalDustNeeded - userInputUtxoDusts;
+      }
 
       // Select UTXOs if fee increased and we need more BTC
       if (currentFee > lastFee && targetBtcAmount > 0) {
         const _selectedUtxos = this.selectBtcUtxos(btcUtxos, targetBtcAmount);
 
         if (_selectedUtxos.length === 0) {
-          throw new Error("INSUFFICIENT_BTC_UTXOs");
+          throw new Error(
+            `INSUFFICIENT_BTC_UTXOs: need ${targetBtcAmount} more sats (inputs=${manualInputTotal}, outputs=${manualOutputTotal}, fee=${currentFee}, dust=${additionalDustNeeded})`,
+          );
         }
 
         // Update input types for next fee calculation
@@ -375,10 +402,25 @@ export class Transaction {
       totalBtcAmount += BigInt(utxo.satoshis);
     });
 
-    const changeBtcAmount = totalBtcAmount - targetBtcAmount;
+    // Calculate change
+    let changeBtcAmount: bigint;
+    if (this.config.manualBuild) {
+      // In manual mode: change = (manual inputs + selected UTXOs) - outputs - fee - dust
+      changeBtcAmount =
+        manualInputTotal + totalBtcAmount - manualOutputTotal - currentFee - additionalDustNeeded;
+    } else {
+      // In auto mode: change = selected UTXOs - target amount
+      changeBtcAmount = totalBtcAmount - targetBtcAmount;
+    }
 
     if (changeBtcAmount < 0) {
-      throw new Error("Insufficient UTXO(s)");
+      throw new Error(
+        `Insufficient UTXO(s): shortage=${-changeBtcAmount} sats (inputs=${
+          this.config.manualBuild ? manualInputTotal + totalBtcAmount : totalBtcAmount
+        }, outputs=${
+          this.config.manualBuild ? manualOutputTotal : btcAmount
+        }, fee=${currentFee}, dust=${additionalDustNeeded})`,
+      );
     }
 
     // Add change output if amount is above dust threshold
@@ -423,8 +465,6 @@ export class Transaction {
       string,
       { needBtc: boolean; runeIds: Set<string> }
     >();
-
-    const poolAddresses = this.intentions.map((i) => i.poolAddress);
 
     // Payment address always needs BTC
     needMap.set(this.config.paymentAddress, {
@@ -477,10 +517,7 @@ export class Transaction {
       Array.from(needMap.entries()).map(async ([address, need]) => {
         if (need.needBtc) {
           try {
-            btc[address] = await this.client.getBtcUtxos(
-              address,
-              !poolAddresses.includes(address),
-            );
+            btc[address] = await this.client.getBtcUtxos(address);
           } catch {
             btc[address] = [];
           }
@@ -748,48 +785,65 @@ export class Transaction {
         continue;
       }
 
-      for (const [coinId] of Object.entries(coinAmounts)) {
-        if (coinId === BITCOIN_ID) {
-          const btcUtxos = addressUtxos.btc[address] || [];
+      // Track UTXOs already processed in BTC path to avoid double-counting
+      // rune amounts (pool UTXOs appear in both btc[] and rune[] lists).
+      const addedUtxoKeys = new Set<string>();
 
-          // Calculate total input amount
-          const totalInputAmount = btcUtxos.reduce(
-            (total, utxo) => total + BigInt(utxo.satoshis),
-            BigInt(0),
-          );
+      // Process BTC first so we can track which UTXOs were already handled
+      if (coinAmounts[BITCOIN_ID] !== undefined) {
+        const btcUtxos = addressUtxos.btc[address] || [];
 
-          addressOutputCoinAmounts[address] ??= {};
-          addressOutputCoinAmounts[address][coinId] =
-            (addressOutputCoinAmounts[address][coinId] ?? BigInt(0)) +
-            totalInputAmount;
+        // Calculate total input amount
+        const totalInputAmount = btcUtxos.reduce(
+          (total, utxo) => total + BigInt(utxo.satoshis),
+          BigInt(0),
+        );
 
-          // Add as inputs
-          btcUtxos.forEach((utxo) => {
-            this.addInput(utxo);
-            utxo.runes.forEach((rune) => {
-              addressOutputCoinAmounts[address] ??= {};
-              addressOutputCoinAmounts[address][rune.id] =
-                (addressOutputCoinAmounts[address][rune.id] ?? BigInt(0)) +
-                BigInt(rune.amount);
-            });
+        addressOutputCoinAmounts[address] ??= {};
+        addressOutputCoinAmounts[address][BITCOIN_ID] =
+          (addressOutputCoinAmounts[address][BITCOIN_ID] ?? BigInt(0)) +
+          totalInputAmount;
+
+        // Add as inputs
+        btcUtxos.forEach((utxo) => {
+          this.addInput(utxo);
+          addedUtxoKeys.add(`${utxo.txid}:${utxo.vout}`);
+          utxo.runes.forEach((rune) => {
+            addressOutputCoinAmounts[address] ??= {};
+            addressOutputCoinAmounts[address][rune.id] =
+              (addressOutputCoinAmounts[address][rune.id] ?? BigInt(0)) +
+              BigInt(rune.amount);
           });
-        } else {
-          const runeUtxos = addressUtxos.rune[address]?.[coinId] || [];
+        });
+      }
 
-          // Calculate total input rune amount
-          const totalInputRuneAmount = runeUtxos.reduce((total, utxo) => {
-            const runeBalance = utxo.runes.find((r) => r.id === coinId);
-            return total + BigInt(runeBalance?.amount ?? 0);
-          }, BigInt(0));
+      for (const [coinId] of Object.entries(coinAmounts)) {
+        if (coinId === BITCOIN_ID) continue;
 
-          addressOutputCoinAmounts[address] ??= {};
-          addressOutputCoinAmounts[address][coinId] =
-            (addressOutputCoinAmounts[address][coinId] ?? BigInt(0)) +
-            totalInputRuneAmount;
+        const runeUtxos = addressUtxos.rune[address]?.[coinId] || [];
 
-          // Add as inputs
-          runeUtxos.forEach((utxo) => this.addInput(utxo));
-        }
+        // Filter out UTXOs already processed in BTC path to prevent
+        // double-counting rune amounts
+        const newRuneUtxos = runeUtxos.filter(
+          (utxo) => !addedUtxoKeys.has(`${utxo.txid}:${utxo.vout}`),
+        );
+
+        // Calculate total input rune amount from new UTXOs only
+        const totalInputRuneAmount = newRuneUtxos.reduce((total, utxo) => {
+          const runeBalance = utxo.runes.find((r) => r.id === coinId);
+          return total + BigInt(runeBalance?.amount ?? 0);
+        }, BigInt(0));
+
+        addressOutputCoinAmounts[address] ??= {};
+        addressOutputCoinAmounts[address][coinId] =
+          (addressOutputCoinAmounts[address][coinId] ?? BigInt(0)) +
+          totalInputRuneAmount;
+
+        // Add as inputs
+        newRuneUtxos.forEach((utxo) => {
+          this.addInput(utxo);
+          addedUtxoKeys.add(`${utxo.txid}:${utxo.vout}`);
+        });
       }
     }
 
@@ -953,9 +1007,10 @@ export class Transaction {
   }> {
     const addressUtxos = await this.getInvolvedAddressUtxos();
     const paymentAddress = this.config.paymentAddress;
-    const userBtcUtxos = addressUtxos.btc[paymentAddress] ?? [];
+    let userBtcUtxos = addressUtxos.btc[paymentAddress] ?? [];
 
     if (!this.config.manualBuild) {
+
       // Reset pool UTXOs if provided
       for (const it of this.intentions) {
         const pu = (it as any).poolUtxos as Utxo[];
@@ -977,6 +1032,8 @@ export class Transaction {
 
       await this.addBtcAndFees(userBtcUtxos, paymentBtcRequired);
     } else {
+      // Manual mode: pass empty array and 0 amount
+      // addBtcAndFees will handle manual mode specially
       await this.addBtcAndFees(userBtcUtxos, BigInt(0));
     }
 
@@ -992,19 +1049,31 @@ export class Transaction {
 
       const inputAddress = inputUtxo.address;
       if (
-        inputAddress !== this.config.paymentAddress ||
+        inputAddress !== this.config.paymentAddress &&
         inputAddress !== this.config.address
       )
         continue;
 
-      const redeemScript = this.psbt.data.inputs[i].redeemScript;
+      const redeemScript = this.psbt.data.inputs[i]?.redeemScript;
       const addressType = getAddressType(inputAddress);
+
+      // For non-P2TR addresses, resolve the public key:
+      // 1. Use the pubkey stored on the UTXO itself
+      // 2. Fall back to paymentPublicKey if the input is from the payment address
+      // 3. Fall back to publicKey (ordinals) if the input is from the ordinals address
+      let pubkey = inputUtxo.pubkey;
+      if (!pubkey && inputAddress === this.config.paymentAddress) {
+        pubkey = this.config.paymentPublicKey;
+      }
+      if (!pubkey && inputAddress === this.config.address) {
+        pubkey = this.config.publicKey;
+      }
 
       toSignInputs.push({
         index: i,
         ...(addressType === AddressType.P2TR
           ? { address: inputAddress, disableTweakSigner: false }
-          : { publicKey: inputUtxo.pubkey, disableTweakSigner: true }),
+          : { publicKey: pubkey, disableTweakSigner: true }),
       });
 
       if (redeemScript && addressType === AddressType.P2SH_P2WPKH) {

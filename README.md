@@ -27,7 +27,7 @@ import { ReeClient, Network, type Config } from "@omnity/ree-client-ts-sdk";
 
 const config: Config = {
   network: Network.Testnet, // or Network.Mainnet
-  maestroApiKey: "your-maestro-api-key",
+  xverseApiKey: "your-xverse-api-key",
   exchangeIdlFactory: yourExchangeIdlFactory,
   exchangeCanisterId: "your-exchange-canister-id",
   exchangeId: "your-exchange-id",
@@ -558,7 +558,7 @@ import type {
 ```typescript
 interface Config {
   network: Network; // Network.Mainnet or Network.Testnet
-  maestroApiKey: string; // Your Maestro API key
+  xverseApiKey: string; // Your Xverse API key
   exchangeIdlFactory: IDL.InterfaceFactory; // Exchange canister IDL
   exchangeCanisterId: string; // Exchange canister ID
   exchangeId: string; // Exchange ID for transactions

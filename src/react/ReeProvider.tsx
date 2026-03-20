@@ -51,8 +51,8 @@ export function ReeProvider({ children, config }: ReeProviderProps) {
     throw new Error("ReeProvider: config.network is required");
   }
 
-  if (!config.maestroApiKey) {
-    throw new Error("ReeProvider: config.maestroApiKey is required");
+  if (!config.xverseApiKey) {
+    throw new Error("ReeProvider: config.xverseApiKey is required");
   }
 
   if (!config.exchangeIdlFactory) {
@@ -95,6 +95,7 @@ export function ReeProvider({ children, config }: ReeProviderProps) {
         paymentAddress: wallet.paymentAddress,
         feeRate: params?.feeRate,
         publicKey: wallet.publicKey,
+        paymentPublicKey: wallet.paymentPublicKey,
         mergeSelfRuneBtcOutputs: params?.mergeSelfRuneBtcOutputs,
         clientInfo: params?.clientInfo,
         manualBuild: params?.manualBuild,

@@ -1,7 +1,7 @@
 import { Network } from "../types/network";
 
 import { type Config } from "../types/config";
-import { Maestro } from "../lib/maestro";
+import { Xverse } from "../lib/xverse";
 import type { Pool, PoolInfo } from "../types/pool";
 import { type ActorSubclass, Actor, HttpAgent } from "@dfinity/agent";
 import { Transaction } from "../lib/transaction";
@@ -22,8 +22,8 @@ import {
  * Provides methods for Bitcoin UTXO management, Rune operations, and transaction creation
  */
 export class ReeClient {
-  /** Maestro API client for Bitcoin data */
-  readonly maestro: Maestro;
+  /** Xverse API client for Bitcoin data */
+  readonly xverse: Xverse;
   /** Configuration object */
   readonly config: Config;
 
@@ -41,14 +41,14 @@ export class ReeClient {
 
     const isTestNet = config.network === Network.Testnet;
 
-    // Configure Maestro API endpoint based on network
-    const maestroBaseUrl = isTestNet
-      ? "https://xbt-testnet.gomaestro-api.org/v0"
-      : "https://xbt-mainnet.gomaestro-api.org/v0";
+    // Configure Xverse API endpoint based on network
+    const xverseBaseUrl = isTestNet
+      ? "https://api-testnet4.secretkeylabs.io"
+      : "https://api.secretkeylabs.io";
 
-    this.maestro = new Maestro({
-      baseUrl: maestroBaseUrl,
-      apiKey: config.maestroApiKey,
+    this.xverse = new Xverse({
+      baseUrl: xverseBaseUrl,
+      apiKey: config.xverseApiKey,
     });
 
     // Configure ICP host (same for both networks currently)
@@ -86,7 +86,7 @@ export class ReeClient {
    */
   private async filterSpentUtxos(
     address: string,
-    utxos: Utxo[]
+    utxos: Utxo[],
   ): Promise<Utxo[]> {
     const usedOutpoints = (await this.orchestrator.get_used_outpoints([
       address,
@@ -94,8 +94,8 @@ export class ReeClient {
     return utxos.filter(
       ({ txid, vout }) =>
         usedOutpoints.findIndex(
-          ([outpoint]) => `${txid}:${vout}` === outpoint
-        ) < 0
+          ([outpoint]) => `${txid}:${vout}` === outpoint,
+        ) < 0,
     );
   }
 
@@ -108,7 +108,7 @@ export class ReeClient {
    */
   private async getPendingBtcUtxos(paymentAddress: string): Promise<Utxo[]> {
     const res = (await this.orchestrator.get_zero_confirmed_utxos_of_address(
-      paymentAddress
+      paymentAddress,
     )) as OutpointWithValue[];
 
     const addressType = getAddressType(paymentAddress);
@@ -138,10 +138,10 @@ export class ReeClient {
    */
   private async getPendingRuneUtxos(
     address: string,
-    publicKey?: string
+    publicKey?: string,
   ): Promise<Utxo[]> {
     const res = (await this.orchestrator.get_zero_confirmed_utxos_of_address(
-      address
+      address,
     )) as OutpointWithValue[];
 
     const addressType = getAddressType(address);
@@ -176,46 +176,37 @@ export class ReeClient {
    * Handles pagination automatically to fetch all available UTXOs
    * @returns Array of Bitcoin UTXOs
    */
-  async getBtcUtxos(
-    paymentAddress: string,
-    excludeMetaprotocols = true
-  ): Promise<Utxo[]> {
-    let cursor = null;
+  async getBtcUtxos(paymentAddress: string): Promise<Utxo[]> {
+    let offset = 0;
+    const limit = 60;
     const data = [];
     const pendingUtxos = await this.getPendingBtcUtxos(paymentAddress);
 
     // Paginate through all UTXOs
-    do {
-      const res = await this.maestro.utxosByAddressMempoolAware(
+    let hasMore = true;
+    while (hasMore) {
+      const res = await this.xverse.utxosByAddress(
         paymentAddress,
-        cursor,
-        excludeMetaprotocols
+        offset,
+        limit,
       );
-      data.push(...res.data);
-      cursor = res.next_cursor;
-    } while (cursor !== null);
+      data.push(...res.items);
+      hasMore = res.hasMore;
+      offset += limit;
+    }
 
     // Transform raw UTXO data to internal format
-    const btcUtxos: Utxo[] = data.map(
-      ({ txid, vout, runes, satoshis, script_pubkey, address }) => ({
+    const scriptPk = getScriptByAddress(paymentAddress, this.config.network);
+    const btcUtxos: Utxo[] = data
+      .map(({ txid, vout, value }) => ({
         txid,
         vout,
-        address,
-        runes: runes.map(({ rune_id, amount }) => {
-          const divisibility = (amount.split(".")[1] ?? "").length;
-          const rawAmount = new Decimal(amount)
-            .mul(10 ** divisibility)
-            .toFixed(0);
-
-          return {
-            id: rune_id,
-            amount: rawAmount,
-          };
-        }),
-        satoshis,
-        scriptPk: script_pubkey,
-      })
-    );
+        address: paymentAddress,
+        runes: [], // Xverse BTC UTXO API doesn't include runes
+        satoshis: value.toString(),
+        scriptPk: bytesToHex(scriptPk),
+      }))
+      .filter((item) => Number(item.satoshis) > 546);
 
     return this.filterSpentUtxos(paymentAddress, btcUtxos.concat(pendingUtxos));
   }
@@ -228,42 +219,46 @@ export class ReeClient {
   async getRuneUtxos(
     address: string,
     runeId: string,
-    publicKey?: string
+    publicKey?: string,
   ): Promise<Utxo[]> {
-    let cursor = null;
+    let offset = 0;
+    const limit = 60;
     const data = [];
     const pendingUtxos = await this.getPendingRuneUtxos(address, publicKey);
 
     // Paginate through all rune UTXOs for this specific rune
-    do {
-      const res = await this.maestro.runeUtxosByAddress(
+    let hasMore = true;
+    while (hasMore) {
+      const res = await this.xverse.runeUtxosByAddress(
         address,
         runeId,
-        cursor
+        offset,
+        limit,
       );
-      data.push(...res.data);
-      cursor = res.next_cursor;
-    } while (cursor !== null);
+      data.push(...res.items);
+      hasMore = res.hasMore;
+      offset += limit;
+    }
 
     // Transform and add script pubkey for each UTXO
-    const runeUtxos: Utxo[] = data.map(({ txid, vout, runes, satoshis }) => {
-      const scriptPk = getScriptByAddress(address, this.config.network);
+    const scriptPk = getScriptByAddress(address, this.config.network);
+    const runeUtxos: Utxo[] = data.map(({ txid, vout, runes, amount }) => {
       return {
         txid,
         vout,
         address,
-        runes: runes.map(({ rune_id, amount }) => {
-          const divisibility = (amount.split(".")[1] ?? "").length;
-          const rawAmount = new Decimal(amount)
-            .mul(10 ** divisibility)
-            .toFixed(0);
+        runes: runes.map(
+          ({ runeId: rId, amount: runeAmount }) => {
+            // Xverse returns amount as string with decimals, need to convert to raw amount
+            const rawAmount = new Decimal(runeAmount).toFixed(0);
 
-          return {
-            id: rune_id,
-            amount: rawAmount,
-          };
-        }),
-        satoshis,
+            return {
+              id: rId,
+              amount: rawAmount,
+            };
+          },
+        ),
+        satoshis: amount.toString(),
         scriptPk: bytesToHex(scriptPk),
         pubkey: publicKey,
       };
@@ -280,7 +275,7 @@ export class ReeClient {
     const btcUtxos = await this.getBtcUtxos(paymentAddress);
     const satoshis = btcUtxos.reduce(
       (total, utxo) => total + BigInt(utxo.satoshis),
-      BigInt(0)
+      BigInt(0),
     );
 
     return new Decimal(satoshis.toString()).div(1e8).toNumber();
@@ -295,7 +290,7 @@ export class ReeClient {
   async getRuneBalance(
     address: string,
     runeId: string,
-    publicKey?: string
+    publicKey?: string,
   ): Promise<number | undefined> {
     const runeUtxos = await this.getRuneUtxos(address, runeId, publicKey);
 
@@ -306,7 +301,7 @@ export class ReeClient {
     let amount = new Decimal(0);
     for (const utxo of runeUtxos) {
       amount = amount.add(
-        new Decimal(utxo.runes.find((rune) => rune.id === runeId)?.amount ?? 0)
+        new Decimal(utxo.runes.find((rune) => rune.id === runeId)?.amount ?? 0),
       );
     }
 
@@ -361,6 +356,7 @@ export class ReeClient {
     address,
     paymentAddress,
     publicKey,
+    paymentPublicKey,
     feeRate,
     mergeSelfRuneBtcOutputs,
     clientInfo,
@@ -369,6 +365,7 @@ export class ReeClient {
     address: string;
     paymentAddress: string;
     publicKey?: string;
+    paymentPublicKey?: string;
     feeRate?: number;
     mergeSelfRuneBtcOutputs?: boolean;
     clientInfo?: string;
@@ -382,12 +379,13 @@ export class ReeClient {
         address,
         paymentAddress,
         publicKey,
+        paymentPublicKey,
         feeRate,
         mergeSelfRuneBtcOutputs,
         clientInfo,
         manualBuild,
       },
-      this
+      this,
     );
   }
 

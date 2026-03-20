@@ -5,7 +5,7 @@ import type { Config } from "../types/config";
 
 const mockConfig: Config = {
   network: Network.Testnet,
-  maestroApiKey: "test-api-key",
+  xverseApiKey: "test-api-key",
   exchangeIdlFactory: vi.fn(),
   exchangeId: "test-id",
   exchangeCanisterId: "test-canister-id",
